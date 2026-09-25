@@ -221,7 +221,31 @@ function init() {
 function saveState() {
   try {
     localStorage.setItem('dreamCheckState', JSON.stringify(state));
-  } catch(e) {}
+  } catch(e) {
+    // 存储满了：尝试压缩后再保存
+    try {
+      var compact = JSON.parse(JSON.stringify(state));
+      // 1. 压缩聊天记录：每条会话最多保留最近 80 条，并移除旧消息里的表情图片
+      if (compact.chatSessions) {
+        for (var k in compact.chatSessions) {
+          var msgs = compact.chatSessions[k];
+          if (!msgs || msgs.length === 0) continue;
+          if (msgs.length > 80) msgs = msgs.slice(-80);
+          for (var i = 0; i < msgs.length - 10; i++) {
+            if (msgs[i] && msgs[i].stickerData) delete msgs[i].stickerData;
+            if (msgs[i] && msgs[i].type === 'image') delete msgs[i].imageData;
+          }
+          compact.chatSessions[k] = msgs;
+        }
+      }
+      localStorage.setItem('dreamCheckState', JSON.stringify(compact));
+      // 用压缩后的数据覆盖内存
+      state.chatSessions = compact.chatSessions;
+      showToast('存储空间不足，已自动压缩历史数据');
+    } catch(e2) {
+      showToast('⚠️ 保存失败：存储空间已满，请清理表情包/背景图');
+    }
+  }
 }
 
 function loadState() {
