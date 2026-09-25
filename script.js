@@ -1,4 +1,3 @@
-var storage = localforage.createInstance({ name: 'MindApp', storeName: 'state' });
 // 检测URL参数
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('action') === 'call') {
@@ -195,8 +194,8 @@ function renderIconSettings() {
 }
 
 // ===== INIT =====
-async function init() {
-  await loadState();
+function init() {
+  loadState();
   loadChatMessages();
   renderChatMessages();
   renderAll();
@@ -220,13 +219,11 @@ async function init() {
 
 // ===== PERSISTENCE =====
 function saveState() {
-  var data = JSON.stringify(state);
-  storage.setItem('dreamCheckState', data).then(function() {
-    // 成功，什么都不做
-  }).catch(function(e) {
-    // 万一 IndexedDB 也存不下（几乎不可能），自动压缩一次
+  try {
+    localStorage.setItem('dreamCheckState', JSON.stringify(state));
+  } catch(e) {
     try {
-      var compact = JSON.parse(data);
+      var compact = JSON.parse(JSON.stringify(state));
       if (compact.chatSessions) {
         for (var k in compact.chatSessions) {
           var msgs = compact.chatSessions[k];
@@ -239,31 +236,20 @@ function saveState() {
           compact.chatSessions[k] = msgs;
         }
       }
-      storage.setItem('dreamCheckState', JSON.stringify(compact));
+      localStorage.setItem('dreamCheckState', JSON.stringify(compact));
       state.chatSessions = compact.chatSessions;
       showToast('存储空间不足，已自动压缩历史数据');
     } catch(e2) {
-      showToast('⚠️ 保存失败：' + e.message);
+      showToast('⚠️ 保存失败：存储空间已满，请清理表情包/背景图');
     }
-  });
+  }
 }
 
-async function loadState() {
+function loadState() {
   try {
-    // 先从 IndexedDB 读
-    var saved = await storage.getItem('dreamCheckState');
-    // 如果 IndexedDB 没数据，尝试从旧的 localStorage 读（迁移旧数据用）
-    if (!saved) {
-      var oldSaved = localStorage.getItem('dreamCheckState');
-      if (oldSaved) {
-        saved = oldSaved;
-        // 迁移到 IndexedDB
-        await storage.setItem('dreamCheckState', oldSaved);
-        // 保留 localStorage 一份做备份，不删
-      }
-    }
+    var saved = localStorage.getItem('dreamCheckState');
     if (saved) {
-      const parsed = JSON.parse(saved);
+      var parsed = JSON.parse(saved);
       if (parsed.profile) state.profile = parsed.profile;
       if (parsed.dream) state.dream = parsed.dream;
       if (parsed.dreams) state.dreams = parsed.dreams;
