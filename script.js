@@ -3798,6 +3798,7 @@ function renderDiaryList() {
     return;
   }
 
+  // 按时间倒序
   var sorted = state.diaries.slice().sort(function(a, b) { return b.time - a.time; });
 
   container.innerHTML = sorted.map(function(d) {
@@ -3824,20 +3825,19 @@ function renderDiaryList() {
     }
 
     return `
-      <div style="background:var(--card);margin:10px 12px;padding:16px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);position:relative;">
+      <div style="background:var(--card);margin:10px 12px;padding:16px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
           <img src="${avatar}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">
           <div style="flex:1;">
             <div style="font-size:14px;font-weight:600;color:var(--text);">${d.authorName}</div>
             <div style="font-size:11px;color:var(--gray);">${dateStr} ${timeStr}</div>
           </div>
-          <span onclick="deleteDiary('${d.id}')" style="font-size:12px;color:var(--red);cursor:pointer;padding:4px 8px;border-radius:8px;user-select:none;-webkit-tap-highlight-color:transparent;">🗑 删除</span>
         </div>
         <div style="display:flex;gap:6px;margin-bottom:10px;">
           <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">🌤 ${d.weather}</span>
           <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">💭 ${d.mood}</span>
         </div>
-        <div style="font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${d.text}</div>
+               <div style="font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${d.text}</div>
         <div style="margin-top:12px;">
           <span onclick="openDiaryComment('${d.id}')" style="font-size:12px;color:var(--blue);cursor:pointer;padding:4px 0;">💬 评论</span>
         </div>
@@ -3845,14 +3845,6 @@ function renderDiaryList() {
       </div>
     `;
   }).join('');
-}
-
-function deleteDiary(diaryId) {
-  if (!confirm('确定删除这篇日记吗？此操作不可恢复！')) return;
-  state.diaries = state.diaries.filter(function(d) { return d.id !== diaryId; });
-  saveState();
-  renderDiaryList();
-  showToast('日记已删除');
 }
 
 // 打开写日记页面
@@ -4853,66 +4845,7 @@ function endAppDrag(e) {
 function bindAppDrag() {
   var icons = document.querySelectorAll('.app-icon[data-app-key]');
   icons.forEach(function(iconEl) {
-    var pressTimer = null;
-    var startX = 0, startY = 0;
-    var isDragging = false;
-    var activePointerId = null;
-    var savedEvent = null;
-
-    function onPointerDown(e) {
-      if (e.button !== undefined && e.button !== 0) return;
-      startX = e.clientX;
-      startY = e.clientY;
-      activePointerId = e.pointerId;
-      isDragging = false;
-      // 保存坐标副本，因为 e 对象在 setTimeout 里会失效
-      savedEvent = { clientX: e.clientX, clientY: e.clientY, touches: null };
-
-      pressTimer = setTimeout(function() {
-        isDragging = true;
-        if (!window.appEditMode) enterAppEditMode();
-        try { iconEl.setPointerCapture(activePointerId); } catch(err) {}
-        startAppDrag(savedEvent, iconEl);
-      }, 600);
-
-      iconEl.addEventListener('pointermove', onPointerMove);
-      iconEl.addEventListener('pointerup', onPointerUp);
-      iconEl.addEventListener('pointercancel', onPointerUp);
-    }
-
-    function onPointerMove(e) {
-      if (e.pointerId !== activePointerId) return;
-      // 长按前，只要手指稍微移动，就取消长按（让用户正常滑动屏幕）
-      if (!isDragging) {
-        if (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8) {
-          clearTimeout(pressTimer);
-        }
-        return;
-      }
-      moveAppDrag(e);
-    }
-
-    function onPointerUp(e) {
-      if (e.pointerId !== activePointerId) return;
-      clearTimeout(pressTimer);
-
-      iconEl.removeEventListener('pointermove', onPointerMove);
-      iconEl.removeEventListener('pointerup', onPointerUp);
-      iconEl.removeEventListener('pointercancel', onPointerUp);
-
-      try { iconEl.releasePointerCapture(activePointerId); } catch(err) {}
-
-      if (isDragging) {
-        endAppDrag(e);
-      }
-      isDragging = false;
-      activePointerId = null;
-      savedEvent = null;
-    }
-
-    iconEl.addEventListener('pointerdown', onPointerDown);
-  });
-        }
+    var longPressed = false;
 
     function onDown(e) {
       longPressed = false;
