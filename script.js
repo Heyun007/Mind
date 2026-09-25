@@ -1,3 +1,25 @@
+var storage;
+try {
+  if (typeof localforage !== 'undefined') {
+    storage = localforage.createInstance({ name: 'MindApp', storeName: 'state' });
+  } else {
+    throw new Error('localforage 未加载');
+  }
+} catch(e) {
+  // CDN 挂了，自动降级到 localStorage，绝不白屏
+  storage = {
+    setItem: function(k, v) {
+      return new Promise(function(resolve, reject) {
+        try { localStorage.setItem(k, v); resolve(); }
+        catch(err) { reject(err); }
+      });
+    },
+    getItem: function(k) {
+      return new Promise(function(resolve) { resolve(localStorage.getItem(k)); });
+    }
+  };
+}
+
 // 检测URL参数
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('action') === 'call') {
@@ -194,8 +216,8 @@ function renderIconSettings() {
 }
 
 // ===== INIT =====
-function init() {
-  loadState();
+async functioninit(){
+  await loadState()
   loadChatMessages();
   renderChatMessages();
   renderAll();
@@ -219,11 +241,13 @@ function init() {
 
 // ===== PERSISTENCE =====
 function saveState() {
-  try {
-    localStorage.setItem('dreamCheckState', JSON.stringify(state));
-  } catch(e) {
+  var data = JSON.stringify(state);
+  storage.setItem('dreamCheckState', data).then(function() {
+    // 成功，什么都不做
+  }).catch(function(e) {
+    // 万一 IndexedDB 也存不下（几乎不可能），自动压缩一次
     try {
-      var compact = JSON.parse(JSON.stringify(state));
+      var compact = JSON.parse(data);
       if (compact.chatSessions) {
         for (var k in compact.chatSessions) {
           var msgs = compact.chatSessions[k];
@@ -236,20 +260,31 @@ function saveState() {
           compact.chatSessions[k] = msgs;
         }
       }
-      localStorage.setItem('dreamCheckState', JSON.stringify(compact));
+      storage.setItem('dreamCheckState', JSON.stringify(compact));
       state.chatSessions = compact.chatSessions;
       showToast('存储空间不足，已自动压缩历史数据');
     } catch(e2) {
-      showToast('⚠️ 保存失败：存储空间已满，请清理表情包/背景图');
+      showToast('⚠️ 保存失败：' + e.message);
     }
-  }
+  });
 }
 
-function loadState() {
+async function loadState() {
   try {
-    var saved = localStorage.getItem('dreamCheckState');
+    // 先从 IndexedDB 读
+    var saved = await storage.getItem('dreamCheckState');
+    // 如果 IndexedDB 没数据，尝试从旧的 localStorage 读（迁移旧数据用）
+    if (!saved) {
+      var oldSaved = localStorage.getItem('dreamCheckState');
+      if (oldSaved) {
+        saved = oldSaved;
+        // 迁移到 IndexedDB
+        await storage.setItem('dreamCheckState', oldSaved);
+        // 保留 localStorage 一份做备份，不删
+      }
+    }
     if (saved) {
-      var parsed = JSON.parse(saved);
+      const parsed = JSON.parse(saved);
       if (parsed.profile) state.profile = parsed.profile;
       if (parsed.dream) state.dream = parsed.dream;
       if (parsed.dreams) state.dreams = parsed.dreams;
@@ -3832,7 +3867,6 @@ function renderDiaryList() {
     `;
   }).join('');
 }
-
 function deleteDiary(diaryId) {
   if (!confirm('确定删除这篇日记吗？此操作不可恢复！')) return;
   state.diaries = state.diaries.filter(function(d) { return d.id !== diaryId; });
