@@ -216,7 +216,7 @@ function renderIconSettings() {
 }
 
 // ===== INIT =====
-functioninit(){
+function init(){
   loadState()
   loadChatMessages();
   renderChatMessages();
