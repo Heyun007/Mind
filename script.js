@@ -1610,6 +1610,8 @@ function toggleStickerEditMode() {
   renderStickers();
 }
 
+var isEditingStickers = false;
+
 function renderStickers() {
   var panel = document.getElementById('stickerPanel');
   if (!panel) return;
