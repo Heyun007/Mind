@@ -1,24 +1,4 @@
-var storage;
-try {
-  if (typeof localforage !== 'undefined') {
-    storage = localforage.createInstance({ name: 'MindApp', storeName: 'state' });
-  } else {
-    throw new Error('localforage 未加载');
-  }
-} catch(e) {
-  // CDN 挂了，自动降级到 localStorage，绝不白屏
-  storage = {
-    setItem: function(k, v) {
-      return new Promise(function(resolve, reject) {
-        try { localStorage.setItem(k, v); resolve(); }
-        catch(err) { reject(err); }
-      });
-    },
-    getItem: function(k) {
-      return new Promise(function(resolve) { resolve(localStorage.getItem(k)); });
-    }
-  };
-}
+var storage = localforage.createInstance({ name: 'MindApp', storeName: 'state' });
 
 // 检测URL参数
 const urlParams = new URLSearchParams(window.location.search);
@@ -216,8 +196,8 @@ function renderIconSettings() {
 }
 
 // ===== INIT =====
-function init(){
-  loadState()
+async function init() {
+  await loadState();
   loadChatMessages();
   renderChatMessages();
   renderAll();
@@ -3819,6 +3799,7 @@ function renderDiaryList() {
     return;
   }
 
+  // 按时间倒序
   var sorted = state.diaries.slice().sort(function(a, b) { return b.time - a.time; });
 
   container.innerHTML = sorted.map(function(d) {
@@ -3845,20 +3826,19 @@ function renderDiaryList() {
     }
 
     return `
-      <div style="background:var(--card);margin:10px 12px;padding:16px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);position:relative;">
+      <div style="background:var(--card);margin:10px 12px;padding:16px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
           <img src="${avatar}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">
           <div style="flex:1;">
             <div style="font-size:14px;font-weight:600;color:var(--text);">${d.authorName}</div>
             <div style="font-size:11px;color:var(--gray);">${dateStr} ${timeStr}</div>
           </div>
-          <span onclick="deleteDiary('${d.id}')" style="font-size:12px;color:var(--red);cursor:pointer;padding:4px 8px;border-radius:8px;user-select:none;-webkit-tap-highlight-color:transparent;">🗑 删除</span>
         </div>
         <div style="display:flex;gap:6px;margin-bottom:10px;">
           <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">🌤 ${d.weather}</span>
           <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">💭 ${d.mood}</span>
         </div>
-        <div style="font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${d.text}</div>
+               <div style="font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${d.text}</div>
         <div style="margin-top:12px;">
           <span onclick="openDiaryComment('${d.id}')" style="font-size:12px;color:var(--blue);cursor:pointer;padding:4px 0;">💬 评论</span>
         </div>
@@ -3866,13 +3846,6 @@ function renderDiaryList() {
       </div>
     `;
   }).join('');
-}
-function deleteDiary(diaryId) {
-  if (!confirm('确定删除这篇日记吗？此操作不可恢复！')) return;
-  state.diaries = state.diaries.filter(function(d) { return d.id !== diaryId; });
-  saveState();
-  renderDiaryList();
-  showToast('日记已删除');
 }
 
 // 打开写日记页面
