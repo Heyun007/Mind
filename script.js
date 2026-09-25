@@ -242,6 +242,18 @@ function loadState() {
       if (parsed.settings) state.settings = parsed.settings;
       if (parsed.nextCallId) state.nextCallId = parsed.nextCallId;
       if (parsed.nextCheckinId) state.nextCheckinId = parsed.nextCheckinId;
+      // 【补上这些，否则刷新后数据就丢】
+      if (parsed.pokes) state.pokes = parsed.pokes;
+      if (parsed.diaries) state.diaries = parsed.diaries;
+      if (parsed.favorites) state.favorites = parsed.favorites;
+      if (parsed.anniversaries) state.anniversaries = parsed.anniversaries;
+      if (parsed.mails) state.mails = parsed.mails;
+      if (parsed.mutedChats) state.mutedChats = parsed.mutedChats;
+      if (parsed.lastReadAt) state.lastReadAt = parsed.lastReadAt;
+      if (parsed.lastActivityAt) state.lastActivityAt = parsed.lastActivityAt;
+      if (parsed.compSelectedDreamId) state.compSelectedDreamId = parsed.compSelectedDreamId;
+      if (parsed.userDiaryLastDate) state.userDiaryLastDate = parsed.userDiaryLastDate;
+      if (parsed.appPages) state.appPages = parsed.appPages;
     }
   } catch(e) {}
 }
