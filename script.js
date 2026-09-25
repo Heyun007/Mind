@@ -1,3 +1,4 @@
+var storage = localforage.createInstance({ name: 'MindApp', storeName: 'state' });
 // 检测URL参数
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('action') === 'call') {
@@ -194,8 +195,8 @@ function renderIconSettings() {
 }
 
 // ===== INIT =====
-function init() {
-  loadState();
+async function init() {
+  await loadState();
   loadChatMessages();
   renderChatMessages();
   renderAll();
@@ -219,11 +220,13 @@ function init() {
 
 // ===== PERSISTENCE =====
 function saveState() {
-  try {
-    localStorage.setItem('dreamCheckState', JSON.stringify(state));
-  } catch(e) {
+  var data = JSON.stringify(state);
+  storage.setItem('dreamCheckState', data).then(function() {
+    // 成功，什么都不做
+  }).catch(function(e) {
+    // 万一 IndexedDB 也存不下（几乎不可能），自动压缩一次
     try {
-      var compact = JSON.parse(JSON.stringify(state));
+      var compact = JSON.parse(data);
       if (compact.chatSessions) {
         for (var k in compact.chatSessions) {
           var msgs = compact.chatSessions[k];
@@ -236,18 +239,29 @@ function saveState() {
           compact.chatSessions[k] = msgs;
         }
       }
-      localStorage.setItem('dreamCheckState', JSON.stringify(compact));
+      storage.setItem('dreamCheckState', JSON.stringify(compact));
       state.chatSessions = compact.chatSessions;
       showToast('存储空间不足，已自动压缩历史数据');
     } catch(e2) {
-      showToast('⚠️ 保存失败：存储空间已满，请清理表情包/背景图');
+      showToast('⚠️ 保存失败：' + e.message);
     }
-  }
+  });
 }
 
-function loadState() {
+async function loadState() {
   try {
-    const saved = localStorage.getItem('dreamCheckState');
+    // 先从 IndexedDB 读
+    var saved = await storage.getItem('dreamCheckState');
+    // 如果 IndexedDB 没数据，尝试从旧的 localStorage 读（迁移旧数据用）
+    if (!saved) {
+      var oldSaved = localStorage.getItem('dreamCheckState');
+      if (oldSaved) {
+        saved = oldSaved;
+        // 迁移到 IndexedDB
+        await storage.setItem('dreamCheckState', oldSaved);
+        // 保留 localStorage 一份做备份，不删
+      }
+    }
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed.profile) state.profile = parsed.profile;
@@ -263,8 +277,21 @@ function loadState() {
       if (parsed.settings) state.settings = parsed.settings;
       if (parsed.nextCallId) state.nextCallId = parsed.nextCallId;
       if (parsed.nextCheckinId) state.nextCheckinId = parsed.nextCheckinId;
+      if (parsed.pokes) state.pokes = parsed.pokes;
+      if (parsed.diaries) state.diaries = parsed.diaries;
+      if (parsed.favorites) state.favorites = parsed.favorites;
+      if (parsed.anniversaries) state.anniversaries = parsed.anniversaries;
+      if (parsed.mails) state.mails = parsed.mails;
+      if (parsed.mutedChats) state.mutedChats = parsed.mutedChats;
+      if (parsed.lastReadAt) state.lastReadAt = parsed.lastReadAt;
+      if (parsed.lastActivityAt) state.lastActivityAt = parsed.lastActivityAt;
+      if (parsed.compSelectedDreamId) state.compSelectedDreamId = parsed.compSelectedDreamId;
+      if (parsed.userDiaryLastDate) state.userDiaryLastDate = parsed.userDiaryLastDate;
+      if (parsed.appPages) state.appPages = parsed.appPages;
     }
-  } catch(e) {}
+  } catch(e) {
+    console.error('loadState 出错：', e);
+  }
 }
 
 // ===== TIME =====
@@ -1630,6 +1657,8 @@ function toggleStickerEditMode() {
   isEditingStickers = !isEditingStickers;
   renderStickers();
 }
+
+var isEditingStickers = false;
 
 function renderStickers() {
   var panel = document.getElementById('stickerPanel');
@@ -3769,7 +3798,6 @@ function renderDiaryList() {
     return;
   }
 
-  // 按时间倒序
   var sorted = state.diaries.slice().sort(function(a, b) { return b.time - a.time; });
 
   container.innerHTML = sorted.map(function(d) {
@@ -3796,19 +3824,20 @@ function renderDiaryList() {
     }
 
     return `
-      <div style="background:var(--card);margin:10px 12px;padding:16px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);">
+      <div style="background:var(--card);margin:10px 12px;padding:16px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);position:relative;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
           <img src="${avatar}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">
           <div style="flex:1;">
             <div style="font-size:14px;font-weight:600;color:var(--text);">${d.authorName}</div>
             <div style="font-size:11px;color:var(--gray);">${dateStr} ${timeStr}</div>
           </div>
+          <span onclick="deleteDiary('${d.id}')" style="font-size:12px;color:var(--red);cursor:pointer;padding:4px 8px;border-radius:8px;user-select:none;-webkit-tap-highlight-color:transparent;">🗑 删除</span>
         </div>
         <div style="display:flex;gap:6px;margin-bottom:10px;">
           <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">🌤 ${d.weather}</span>
           <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">💭 ${d.mood}</span>
         </div>
-               <div style="font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${d.text}</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${d.text}</div>
         <div style="margin-top:12px;">
           <span onclick="openDiaryComment('${d.id}')" style="font-size:12px;color:var(--blue);cursor:pointer;padding:4px 0;">💬 评论</span>
         </div>
@@ -3816,6 +3845,14 @@ function renderDiaryList() {
       </div>
     `;
   }).join('');
+}
+
+function deleteDiary(diaryId) {
+  if (!confirm('确定删除这篇日记吗？此操作不可恢复！')) return;
+  state.diaries = state.diaries.filter(function(d) { return d.id !== diaryId; });
+  saveState();
+  renderDiaryList();
+  showToast('日记已删除');
 }
 
 // 打开写日记页面
@@ -4816,7 +4853,66 @@ function endAppDrag(e) {
 function bindAppDrag() {
   var icons = document.querySelectorAll('.app-icon[data-app-key]');
   icons.forEach(function(iconEl) {
-    var longPressed = false;
+    var pressTimer = null;
+    var startX = 0, startY = 0;
+    var isDragging = false;
+    var activePointerId = null;
+    var savedEvent = null;
+
+    function onPointerDown(e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      startX = e.clientX;
+      startY = e.clientY;
+      activePointerId = e.pointerId;
+      isDragging = false;
+      // 保存坐标副本，因为 e 对象在 setTimeout 里会失效
+      savedEvent = { clientX: e.clientX, clientY: e.clientY, touches: null };
+
+      pressTimer = setTimeout(function() {
+        isDragging = true;
+        if (!window.appEditMode) enterAppEditMode();
+        try { iconEl.setPointerCapture(activePointerId); } catch(err) {}
+        startAppDrag(savedEvent, iconEl);
+      }, 600);
+
+      iconEl.addEventListener('pointermove', onPointerMove);
+      iconEl.addEventListener('pointerup', onPointerUp);
+      iconEl.addEventListener('pointercancel', onPointerUp);
+    }
+
+    function onPointerMove(e) {
+      if (e.pointerId !== activePointerId) return;
+      // 长按前，只要手指稍微移动，就取消长按（让用户正常滑动屏幕）
+      if (!isDragging) {
+        if (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8) {
+          clearTimeout(pressTimer);
+        }
+        return;
+      }
+      moveAppDrag(e);
+    }
+
+    function onPointerUp(e) {
+      if (e.pointerId !== activePointerId) return;
+      clearTimeout(pressTimer);
+
+      iconEl.removeEventListener('pointermove', onPointerMove);
+      iconEl.removeEventListener('pointerup', onPointerUp);
+      iconEl.removeEventListener('pointercancel', onPointerUp);
+
+      try { iconEl.releasePointerCapture(activePointerId); } catch(err) {}
+
+      if (isDragging) {
+        endAppDrag(e);
+      }
+      isDragging = false;
+      activePointerId = null;
+      savedEvent = null;
+    }
+
+    iconEl.addEventListener('pointerdown', onPointerDown);
+  });
+        }
 
     function onDown(e) {
       longPressed = false;
