@@ -1,4 +1,3 @@
-var storage = localforage.createInstance({ name: 'MindApp', storeName: 'state' });
 // 检测URL参数
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('action') === 'call') {
@@ -195,8 +194,8 @@ function renderIconSettings() {
 }
 
 // ===== INIT =====
-async function init() {
-  await loadState();
+function init() {
+  loadState();
   loadChatMessages();
   renderChatMessages();
   renderAll();
@@ -220,13 +219,13 @@ async function init() {
 
 // ===== PERSISTENCE =====
 function saveState() {
-  var data = JSON.stringify(state);
-  storage.setItem('dreamCheckState', data).then(function() {
-    // 成功，什么都不做
-  }).catch(function(e) {
-    // 万一 IndexedDB 也存不下（几乎不可能），自动压缩一次
+  try {
+    localStorage.setItem('dreamCheckState', JSON.stringify(state));
+  } catch(e) {
+    // 存储满了：尝试压缩后再保存
     try {
-      var compact = JSON.parse(data);
+      var compact = JSON.parse(JSON.stringify(state));
+      // 1. 压缩聊天记录：每条会话最多保留最近 80 条，并移除旧消息里的表情图片
       if (compact.chatSessions) {
         for (var k in compact.chatSessions) {
           var msgs = compact.chatSessions[k];
@@ -239,29 +238,19 @@ function saveState() {
           compact.chatSessions[k] = msgs;
         }
       }
-      storage.setItem('dreamCheckState', JSON.stringify(compact));
+      localStorage.setItem('dreamCheckState', JSON.stringify(compact));
+      // 用压缩后的数据覆盖内存
       state.chatSessions = compact.chatSessions;
       showToast('存储空间不足，已自动压缩历史数据');
     } catch(e2) {
-      showToast('⚠️ 保存失败：' + e.message);
+      showToast('⚠️ 保存失败：存储空间已满，请清理表情包/背景图');
     }
-  });
+  }
 }
 
-async function loadState() {
+function loadState() {
   try {
-    // 先从 IndexedDB 读
-    var saved = await storage.getItem('dreamCheckState');
-    // 如果 IndexedDB 没数据，尝试从旧的 localStorage 读（迁移旧数据用）
-    if (!saved) {
-      var oldSaved = localStorage.getItem('dreamCheckState');
-      if (oldSaved) {
-        saved = oldSaved;
-        // 迁移到 IndexedDB
-        await storage.setItem('dreamCheckState', oldSaved);
-        // 保留 localStorage 一份做备份，不删
-      }
-    }
+    const saved = localStorage.getItem('dreamCheckState');
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed.profile) state.profile = parsed.profile;
@@ -277,6 +266,7 @@ async function loadState() {
       if (parsed.settings) state.settings = parsed.settings;
       if (parsed.nextCallId) state.nextCallId = parsed.nextCallId;
       if (parsed.nextCheckinId) state.nextCheckinId = parsed.nextCheckinId;
+      // 【补上这些，否则刷新后数据就丢】
       if (parsed.pokes) state.pokes = parsed.pokes;
       if (parsed.diaries) state.diaries = parsed.diaries;
       if (parsed.favorites) state.favorites = parsed.favorites;
@@ -289,9 +279,7 @@ async function loadState() {
       if (parsed.userDiaryLastDate) state.userDiaryLastDate = parsed.userDiaryLastDate;
       if (parsed.appPages) state.appPages = parsed.appPages;
     }
-  } catch(e) {
-    console.error('loadState 出错：', e);
-  }
+  } catch(e) {}
 }
 
 // ===== TIME =====
