@@ -221,7 +221,28 @@ function init() {
 function saveState() {
   try {
     localStorage.setItem('dreamCheckState', JSON.stringify(state));
-  } catch(e) {}
+  } catch(e) {
+    try {
+      var compact = JSON.parse(JSON.stringify(state));
+      if (compact.chatSessions) {
+        for (var k in compact.chatSessions) {
+          var msgs = compact.chatSessions[k];
+          if (!msgs || msgs.length === 0) continue;
+          if (msgs.length > 80) msgs = msgs.slice(-80);
+          for (var i = 0; i < msgs.length - 10; i++) {
+            if (msgs[i] && msgs[i].stickerData) delete msgs[i].stickerData;
+            if (msgs[i] && msgs[i].type === 'image') delete msgs[i].imageData;
+          }
+          compact.chatSessions[k] = msgs;
+        }
+      }
+      localStorage.setItem('dreamCheckState', JSON.stringify(compact));
+      state.chatSessions = compact.chatSessions;
+      showToast('存储空间不足，已自动压缩历史数据');
+    } catch(e2) {
+      showToast('⚠️ 保存失败：存储空间已满，请清理表情包/背景图');
+    }
+  }
 }
 
 function loadState() {
