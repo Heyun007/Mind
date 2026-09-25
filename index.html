@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>Mind</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="phone" id="app">
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <div class="status-left" id="statusTime">00:00</div>
+  <div class="status-right">
+    <div class="signal">
+      <span></span><span></span><span></span><span></span>
+    </div>
+    <div class="battery"><div class="level" style="width:72%"></div></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Companion ===== -->
+<div class="page" id="pageCompanion">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>陪伴</h2>
+  </div>
+  <div class="page-body" style="padding:0;background:linear-gradient(180deg,#0d0d1a,#0a1628);">
+    <div class="companion-page">
+      <div class="comp-top-bar">
+        <span class="comp-time" id="compClock">00:00</span>
+        <span class="comp-site-title">陪伴</span>
+        <button class="comp-settings-icon" id="compCharBtn">👤</button>
+        <button class="comp-settings-icon" id="compSettingsBtn">⚙</button>
+      </div>
+      <div class="comp-avatar-area" id="compAvatarArea">
+        <div class="comp-avatar-wrap" id="compAvatarWrap">
+          <div class="comp-avatar" id="compAvatar">🐳</div>
+          <div class="comp-end-btn" id="compEndBtn">结束</div>
+          <div class="comp-func-bubbles" id="compFuncBubbles">
+            <div class="comp-func-bubble comp-left1" data-action="touch">摸摸</div>
+            <div class="comp-func-bubble comp-left2" data-action="hug">抱抱</div>
+            <div class="comp-func-bubble comp-left3" data-action="kiss">亲亲</div>
+            <div class="comp-func-bubble comp-right1" data-action="mood">心情</div>
+            <div class="comp-func-bubble comp-right2" data-action="vent">倾诉</div>
+            <div class="comp-func-bubble comp-right3" data-action="random">随便说点...</div>
+          </div>
+          <div class="comp-msg-bubble" id="compMsgBubble"></div>
+        </div>
+      </div>
+      <div class="comp-modes-area" id="compModesArea">
+        <div class="comp-mode-btn" data-mode="study">学习模式</div>
+        <div class="comp-mode-btn" data-mode="work">工作模式</div>
+        <div class="comp-mode-btn" data-mode="meditate">冥想模式</div>
+        <div class="comp-mode-btn" data-mode="bath">洗澡模式</div>
+        <div class="comp-mode-btn" data-mode="play">娱乐模式</div>
+      </div>
+      <div class="comp-mode-panel" id="compModePanel">
+        <div class="comp-stat-row"><span class="comp-label">计时器</span><span class="comp-value" id="compTimerDisplay">00:00:00</span></div>
+        <div class="comp-stat-row"><span class="comp-label">专注力</span><span class="comp-value" id="compFocusDisplay">—</span></div>
+        <div class="comp-stat-row"><span class="comp-label">心情</span><span class="comp-value" id="compMoodDisplay">—</span></div>
+        <div class="comp-mode-end-btn" id="compModeEndBtn">结束</div>
+      </div>
+      <div class="comp-chat-area" id="compChatArea"></div>
+      <div class="comp-input-area" id="compInputArea">
+        <textarea id="compVentInput" placeholder="想说点什么都可以..."></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 陪伴设置弹窗 -->
+<div class="comp-modal-overlay" id="compSettingsModal">
+  <div class="comp-modal">
+    <h3>陪伴设置</h3>
+    <div class="comp-setting-item"><label>背景图片</label><input type="file" accept="image/*" id="compBgInput"></div>
+    <div class="comp-setting-item"><label>背景图模糊度</label><input type="range" min="0" max="20" step="0.5" value="0" id="compBgBlurRange"><div class="comp-range-val" id="compBgBlurVal">0px</div></div>
+    <div class="comp-setting-item"><label>头像</label><input type="file" accept="image/*" id="compAvatarInput"></div>
+    <div class="comp-setting-item"><label>字体颜色</label><input type="color" id="compColorInput" value="#e0e0e0"></div>
+    <div class="comp-setting-item"><label>字体大小</label><input type="range" min="12" max="22" step="1" value="14" id="compFontSizeRange"><div class="comp-range-val" id="compFontSizeVal">14px</div></div>
+    <div class="comp-modal-btns"><button class="comp-save" id="compSaveSettings">保存</button><button class="comp-reset" id="compResetSettings">重置</button><button class="comp-close-btn" id="compCloseSettings">关闭</button></div>
+  </div>
+</div>
+<!-- 陪伴角色选择弹窗 -->
+<div class="comp-modal-overlay" id="compCharModal">
+  <div class="comp-modal">
+    <h3>选择角色</h3>
+    <div id="compCharList" style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- 陪伴心情弹窗 -->
+<div class="comp-modal-overlay" id="compMoodModal">
+  <div class="comp-modal">
+    <h3>你的心情是怎样的？</h3>
+    <div class="comp-mood-grid" id="compMoodGrid"></div>
+  </div>
+</div>
+
+<!-- Main Content (Home) -->
+<div class="main-content" id="pageHome">
+  <div class="app-grid" id="homeAppGrid"></div>
+</div>
+
+<!-- ===== PAGE: Chat List ===== -->
+<div class="page" id="pageChatList">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>聊天</h2>
+    <button onclick="createGroupChat()" style="width:32px;height:32px;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--blue);display:flex;align-items:center;justify-content:center;">💬+</button>
+  </div>
+  <div class="page-body" style="padding:0;">
+    <div id="chatListContainer" style="display:flex;flex-direction:column;"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Private Chat Window ===== -->
+<div class="page" id="pagePrivateChat">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageChatList')">‹</button>
+    <h2 id="chatHeaderName">˗ˋˏ♡ˎˊ˗</h2>
+    <button onclick="openChatSettings()" style="width:32px;height:32px;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--gray);display:flex;align-items:center;justify-content:center;">⋮</button>
+  </div>
+  
+  <div class="page-body" id="chatBody" style="display:flex;flex-direction:column;padding:0;position:relative;">
+    <div id="chatMessages" style="flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px;">
+      <div class="empty-state" style="padding:40px 20px;text-align:center;color:var(--gray);font-size:14px;">开始和梦角聊天吧</div>
+    </div>
+    
+    <!-- 正在输入悬浮点（现在绝对在这个页面里了） -->
+    <div id="typingIndicator" style="display:none; position:absolute; bottom: 75px; left: 16px; background: rgba(255,255,255,0.9); border-radius: 16px; padding: 6px 14px; font-size: 11px; color: #555; box-shadow: 0 2px 10px rgba(0,0,0,0.1); z-index: 15; align-items: center; gap: 6px; backdrop-filter: blur(10px);">
+    </div>
+
+    <div style="position:relative;padding:10px 12px;border-top:1px solid var(--border);background:var(--card);">
+      
+      <!-- +号主菜单面板 -->
+      <div id="actionMenuPanel" style="display:none;position:absolute;bottom:60px;left:0;width:100%;background:var(--card);border-radius:16px 16px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,0.1);padding:16px;z-index:20;border-top:2px solid var(--border);">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;text-align:center;">
+          <div onclick="openStickerPanel()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">😀</div>
+            <div style="font-size:11px;color:var(--gray);">表情包</div>
+          </div>
+          <div onclick="openPokePanel()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">👋</div>
+            <div style="font-size:11px;color:var(--gray);">拍一拍</div>
+          </div>
+          <div onclick="document.getElementById('imageMessageInput').click()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">🖼️</div>
+            <div style="font-size:11px;color:var(--gray);">图片</div>
+          </div>
+                    <div onclick="openStats()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">📊</div>
+            <div style="font-size:11px;color:var(--gray);">统计</div>
+          </div>
+                    <div onclick="openStatusCheck()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">💭</div>
+            <div style="font-size:11px;color:var(--gray);">状态</div>
+          </div>
+                    <div onclick="openCallPanel()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">📞</div>
+            <div style="font-size:11px;color:var(--gray);">通话</div>
+          </div>
+        </div>
+        <input type="file" id="imageMessageInput" accept="image/*" style="display:none" onchange="sendImageMessage(event)">
+      </div>
+
+      <!-- 表情包面板 -->
+      <div id="stickerPanel" style="display:none;position:absolute;bottom:60px;left:0;width:100%;height:200px;background:var(--card);border-radius:16px 16px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,0.1);padding:12px;overflow-y:auto;z-index:20;border-top:2px solid var(--border);"></div>
+
+      <!-- 拍一拍面板 -->
+      <div id="pokePanel" style="display:none;position:absolute;bottom:60px;left:0;width:100%;height:240px;background:var(--card);border-radius:16px 16px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,0.1);padding:12px;overflow-y:auto;z-index:20;border-top:2px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-size:13px;font-weight:600;">拍一拍词条</span>
+          <button onclick="addPokeText()" style="font-size:12px;padding:2px 10px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--blue);">+ 添加</button>
+        </div>
+        <div id="pokeListContainer"></div>
+      </div>
+
+      <div id="multiSelectBar" style="display:none;padding:10px 14px;background:rgba(255,255,255,0.7);backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);border-top:1px solid var(--border);justify-content:space-between;align-items:center;">
+        <div id="forwardPanel" style="display:none;position:fixed;bottom:0;left:0;width:100%;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,0.15);z-index:600;max-height:60vh;overflow-y:auto;">
+  <div style="padding:16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-weight:600;font-size:15px;">转发给</span>
+    <span onclick="closeForwardPanel()" style="cursor:pointer;font-size:20px;color:#999;">×</span>
+  </div>
+  <div id="forwardTargetList" style="padding:8px 0;"></div>
+</div>
+<div id="forwardMask" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:599;"></div>
+  <span id="multiSelectCount" style="font-size:13px;color:var(--gray);">已选 0 条</span>
+  <div style="display:flex;gap:8px;">
+       <button onclick="openForwardPanel()" style="padding:6px 14px;border:none;border-radius:8px;background:rgba(0,122,255,0.85);color:#fff;font-size:13px;cursor:pointer;">转发</button>
+    <button onclick="batchDeleteMessages()" style="padding:6px 14px;border:none;border-radius:8px;background:rgba(255,59,48,0.85);color:#fff;font-size:13px;cursor:pointer;">删除</button>
+    <button onclick="exitMultiSelect()" style="padding:6px 14px;border:none;border-radius:8px;background:rgba(120,120,128,0.85);color:#fff;font-size:13px;cursor:pointer;">取消</button>
+  </div>
+</div>
+      <div id="quotePreview" style="display:none;margin-bottom:8px;padding:8px 12px;background:rgba(0,0,0,0.05);border-left:3px solid var(--blue);border-radius:8px;font-size:12px;color:#666;position:relative;">
+  <span id="quoteText"></span>
+  <span onclick="clearQuote()" style="position:absolute;top:4px;right:8px;cursor:pointer;font-size:16px;color:#999;">×</span>
+</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="stickerToggle" onclick="toggleActionMenu()" style="width:36px;height:36px;border-radius:50%;border:none;background:var(--bg);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--blue);flex-shrink:0;">+</button>
+        <input type="text" id="chatInput" placeholder="输入消息..." style="flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:20px;font-size:14px;outline:none;background:var(--bg);" onkeydown="if(event.key==='Enter')sendChatMsg()">
+        <button onclick="sendChatMsg()" style="width:40px;height:40px;border-radius:50%;border:none;background:var(--blue);color:#fff;font-size:18px;cursor:pointer;">➤</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Create Group ===== -->
+<div class="page" id="pageCreateGroup">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageChatList')">‹</button>
+    <h2>发起群聊</h2>
+    <button onclick="saveGroup()" style="width:48px;height:32px;border:none;background:var(--blue);color:#fff;border-radius:8px;font-size:13px;cursor:pointer;">创建</button>
+  </div>
+  <div class="page-body">
+    <div class="form-group">
+      <label>群聊名称</label>
+      <input type="text" id="groupNameInput" placeholder="给群聊起个名字吧" value="我们的秘密基地">
+    </div>
+    <label style="font-size:14px;font-weight:600;color:var(--text);display:block;margin:16px 0 8px;">选择群成员</label>
+    <div id="groupMemberList" style="display:flex;flex-direction:column;gap:8px;"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Group Settings ===== -->
+<div class="page" id="pageGroupSettings">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pagePrivateChat')">‹</button>
+    <h2>群聊设置</h2>
+  </div>
+  <div class="page-body">
+    <div id="groupOwnerArea"></div>
+    <label style="font-size:14px;font-weight:600;color:var(--text);display:block;margin-top:16px;margin-bottom:8px;">群成员管理</label>
+       <div class="setting-item" onclick="document.getElementById('groupBgInput').click()" style="min-height:50px;">
+      <div class="si-left">
+        <span class="si-label">群聊背景</span>
+        <span class="si-desc">仅本群生效</span>
+      </div>
+      <div class="si-right">›</div>
+      <input type="file" id="groupBgInput" accept="image/*" style="display:none" onchange="handleGroupBg(event)">
+    </div>
+    <div id="groupMemberManageList"></div>
+    <button class="btn-primary" onclick="saveGroupSettings()" style="margin-top:24px;">保存设置</button>
+    <button class="btn-danger" onclick="dissolveGroup()" style="margin-top:12px;">解散群聊</button>
+  </div>
+</div>
+
+<!-- ===== PAGE: Personal Profile ===== -->
+<div class="page" id="pageProfile">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>个人主页</h2>
+  </div>
+  <div class="page-body">
+    <div class="avatar-edit">
+      <img class="avatar-preview" id="profileAvatarPreview" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Ccircle cx='40' cy='40' r='40' fill='%23e8e8ed'/%3E%3Ctext x='40' y='44' text-anchor='middle' fill='%2386868b' font-size='28'%3E👤%3C/text%3E%3C/svg%3E" onclick="document.getElementById('profileAvatarInput').click()">
+      <input type="file" id="profileAvatarInput" accept="image/*" style="display:none" onchange="handleProfileAvatar(event)">
+      <span style="font-size:12px;color:var(--gray);cursor:pointer" onclick="document.getElementById('profileAvatarInput').click()">点击更换头像</span>
+    </div>
+    <div class="form-group">
+      <label>昵称</label>
+      <input type="text" id="profileName" placeholder="你的昵称" value="我">
+    </div>
+    <div class="form-group">
+      <label>状态</label>
+      <input type="text" id="profileStatus" placeholder="输入个性状态" value="在线">
+    </div>
+    <button class="btn-primary" onclick="saveProfile()">保存</button>
+  </div>
+</div>
+
+<!-- ===== PAGE: Dream Role List ===== -->
+<div class="page" id="pageDreamRole">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>梦角列表</h2>
+    <button onclick="addDreamRole()" style="width:32px;height:32px;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--blue);display:flex;align-items:center;justify-content:center;">+</button>
+  </div>
+  <div class="page-body" style="padding:0;">
+    <div class="contact-list" id="dreamListContainer"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Edit Dream Role ===== -->
+<div class="page" id="pageEditDreamRole">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageDreamRole')">‹</button>
+    <h2 id="editDreamTitle">编辑梦角</h2>
+  </div>
+  <div class="page-body">
+    <div class="avatar-edit">
+      <img class="avatar-preview" id="dreamAvatarPreview" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Ccircle cx='40' cy='40' r='40' fill='%23ffe0e8'/%3E%3Ctext x='40' y='44' text-anchor='middle' fill='%23d6336c' font-size='28'%3E💜%3C/text%3E%3C/svg%3E">
+      <input type="file" id="dreamAvatarInput" accept="image/*" style="display:none" onchange="handleDreamAvatar(event)">
+      <span style="font-size:12px;color:var(--gray);cursor:pointer" onclick="document.getElementById('dreamAvatarInput').click()">点击更换头像</span>
+    </div>
+    <div class="form-group">
+      <label>梦角名字</label>
+      <input type="text" id="dreamName" placeholder="输入梦角名字">
+    </div>
+    <div class="form-group">
+      <label>性别</label>
+      <select id="dreamGender">
+        <option value="男">男</option>
+        <option value="女">女</option>
+        <option value="其他">其他</option>
+      </select>
+    </div>
+    <button class="btn-primary" onclick="saveDreamRole()">保存</button>
+    <button class="btn-danger" onclick="deleteDreamRole()" style="margin-top:8px;">删除此梦角</button>
+  </div>
+</div>
+
+<!-- ===== PAGE: Word Cards ===== -->
+<div class="page" id="pageWordCards">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>字卡功能</h2>
+  </div>
+  <div class="page-body">
+    <button class="add-cat-btn" onclick="addCategory()">+ 添加分类标签</button>
+    <div id="wordCardsContainer"></div>
+    
+    <!-- 导入字卡区域 -->
+    <div style="margin-top:16px; border-top:1px dashed var(--border); padding-top:16px;">
+      <label style="font-size:13px;font-weight:500;color:var(--gray);display:block;margin-bottom:4px">导入外部字卡</label>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-primary" onclick="document.getElementById('importCardInput').click()" style="flex:1;">选择 JSON 文件导入</button>
+        <input type="file" id="importCardInput" accept=".json" style="display:none" onchange="handleImportCards(event)">
+      </div>
+    </div>
+
+    <!-- 批量添加区域 -->
+    <div class="batch-add-area" style="margin-top:16px">
+      <label style="font-size:13px;font-weight:500;color:var(--gray);display:block;margin-bottom:4px">批量添加字卡（每行一个）</label>
+      <textarea id="batchText" placeholder="怎么还没睡？&#10;又在看手机？&#10;想我了没？"></textarea>
+      <select id="batchCategory" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;margin-bottom:8px;outline:none;background:var(--card);color:var(--text);"></select>
+      <div class="batch-actions">
+        <button class="btn-add" onclick="batchAddCards()">批量添加</button>
+        <button class="btn-clear" onclick="document.getElementById('batchText').value=''">清空</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Chat Settings ===== -->
+<div class="page" id="pageChatSettings">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pagePrivateChat')">‹</button>
+    <h2>聊天设置</h2>
+  </div>
+  <div class="page-body">
+    <div class="setting-item" onclick="document.getElementById('chatBgInput').click()" style="min-height:50px;">
+      <div class="si-left">
+        <span class="si-label">聊天背景</span>
+        <span class="si-desc" id="chatBgStatus">点击选择图片</span>
+      </div>
+      <div id="chatBgPreview" style="width:40px;height:40px;border-radius:8px;background:#e8e8ed;flex-shrink:0;overflow:hidden;display:none;"></div>
+      <div class="si-right">›</div>
+      <input type="file" id="chatBgInput" accept="image/*" style="display:none">
+    </div>
+
+    <div class="form-group">
+      <label>气泡颜色（用户）</label>
+      <input type="color" id="bubbleUserColor" value="#e8e8ed" style="width:100%;height:40px;border:1px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;">
+    </div>
+
+    <div class="form-group">
+      <label>气泡颜色（梦角）</label>
+      <input type="color" id="bubbleDreamColor" value="#e8e8ed" style="width:100%;height:40px;border:1px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;">
+    </div>
+
+    <div class="form-group">
+      <label>字体颜色</label>
+      <input type="color" id="chatFontColor" value="#1d1d1f" style="width:100%;height:40px;border:1px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;">
+    </div>
+
+    <div class="setting-item">
+      <div class="si-left">
+        <span class="si-label">消息免打扰</span>
+        <span class="si-desc">开启后不再显示红点</span>
+      </div>
+      <div class="setting-toggle" id="muteToggle">
+        <div class="toggle-knob"></div>
+      </div>
+    </div>
+
+    <div class="setting-item">
+      <div class="si-left">
+        <span class="si-label">已读不回</span>
+        <span class="si-desc">开启后梦角有概率看了不回</span>
+      </div>
+      <div class="setting-toggle" id="readNoReplyToggle">
+        <div class="toggle-knob"></div>
+      </div>
+    </div>
+
+    <div class="setting-item" onclick="confirmClearChat()" style="border:1px solid var(--red);">
+      <div class="si-left">
+        <span class="si-label" style="color:var(--red);">清除聊天记录</span>
+        <span class="si-desc">此操作不可恢复</span>
+      </div>
+      <div class="si-right" style="color:var(--red);">›</div>
+    </div>
+
+    <button class="btn-primary" onclick="saveChatSettings()" style="margin-top:10px;">保存</button>
+    <button class="btn-secondary" onclick="resetChatSettings()" style="margin-top:8px;">重置</button>
+  </div>
+</div>
+
+<!-- ===== PAGE: Call History ===== -->
+<div class="page" id="pageCallHistory">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>语音通话记录</h2>
+    <button onclick="clearCallHistory()" style="width:32px;height:32px;border:none;background:transparent;font-size:18px;cursor:pointer;color:var(--red);display:flex;align-items:center;justify-content:center;">🗑️</button>
+  </div>
+  <div class="page-body">
+    <div class="history-list" id="callHistoryList">
+      <div class="empty-state">暂无通话记录</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Check-in History ===== -->
+<div class="page" id="pageCheckinHistory">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>查岗记录</h2>
+    <button onclick="clearCheckinHistory()" style="width:32px;height:32px;border:none;background:transparent;font-size:18px;cursor:pointer;color:var(--red);display:flex;align-items:center;justify-content:center;">🗑️</button>
+  </div>
+  <div class="page-body">
+    <div class="history-list" id="checkinHistoryList">
+      <div class="empty-state">暂无查岗记录</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Mailbox ===== -->
+<div class="page" id="pageMailbox">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>信箱</h2>
+    <button onclick="openWriteLetter()" style="width:32px;height:32px;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--blue);">✎</button>
+  </div>
+  <div style="display:flex;background:var(--card);border-bottom:1px solid var(--border);flex-shrink:0;">
+    <div onclick="switchMailTab('inbox')" id="mailTabInbox" style="flex:1;text-align:center;padding:12px;font-size:14px;font-weight:600;color:var(--blue);border-bottom:2px solid var(--blue);cursor:pointer;position:relative;">收信箱<span id="mailUnreadBadge" style="display:none;position:absolute;top:6px;right:25%;background:#ff3b30;color:#fff;font-size:10px;padding:1px 5px;border-radius:8px;">0</span></div>
+    <div onclick="switchMailTab('outbox')" id="mailTabOutbox" style="flex:1;text-align:center;padding:12px;font-size:14px;font-weight:600;color:var(--gray);border-bottom:2px solid transparent;cursor:pointer;">发信箱</div>
+  </div>
+  <div class="page-body" style="padding:0;">
+    <div id="mailList" style="display:flex;flex-direction:column;"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Write Letter ===== -->
+<div class="page" id="pageWriteLetter">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageMailbox')">‹</button>
+    <h2>写信</h2>
+    <button onclick="sendLetter()" style="width:48px;height:32px;border:none;background:var(--blue);color:#fff;border-radius:8px;font-size:13px;cursor:pointer;">发送</button>
+  </div>
+  <div class="page-body">
+    <div class="form-group">
+      <label>收信人</label>
+      <select id="letterTarget" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:12px;font-size:15px;outline:none;background:var(--card);color:var(--text);"></select>
+    </div>
+    <div class="form-group">
+      <label>信件内容</label>
+      <textarea id="letterContent" placeholder="想对TA说些什么……" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:12px;font-size:15px;outline:none;resize:vertical;min-height:200px;background:var(--card);color:var(--text);"></textarea>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Letter Detail ===== -->
+<div class="page" id="pageLetterDetail">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageMailbox')">‹</button>
+    <h2 id="letterDetailTitle">信件</h2>
+  </div>
+  <div class="page-body">
+    <div id="letterDetailContent"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Diary ===== -->
+<div class="page" id="pageDiary">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>日记</h2>
+    <button onclick="openWriteDiary()" style="width:32px;height:32px;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--blue);display:flex;align-items:center;justify-content:center;">✎</button>
+  </div>
+  <div class="page-body" style="padding:0;">
+    <div id="diaryList" style="display:flex;flex-direction:column;"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Write Diary ===== -->
+<div class="page" id="pageWriteDiary">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageDiary')">‹</button>
+    <h2>写日记</h2>
+    <button onclick="saveUserDiary()" style="width:48px;height:32px;border:none;background:var(--blue);color:#fff;border-radius:8px;font-size:13px;cursor:pointer;">保存</button>
+  </div>
+  <div class="page-body">
+       <div class="form-group">
+      <label>今天心情如何？</label>
+      <div id="moodTags" style="display:flex;gap:8px;overflow-x:auto;padding:8px 0;-webkit-overflow-scrolling:touch;"></div>
+    </div>
+    <div class="form-group">
+      <label>今天天气如何？</label>
+      <div id="weatherTags" style="display:flex;gap:8px;overflow-x:auto;padding:8px 0;-webkit-overflow-scrolling:touch;"></div>
+    </div>
+    <div class="form-group">
+      <label>写点什么吧</label>
+      <textarea id="diaryText" placeholder="今天想说点什么……" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:12px;font-size:15px;outline:none;resize:vertical;min-height:150px;background:var(--card);color:var(--text);"></textarea>
+    </div>
+  </div>
+</div>
+  
+<!-- ===== PAGE: Favorites ===== -->
+<div class="page" id="pageFavorites">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>收藏箱</h2>
+  </div>
+  <div class="page-body" style="padding:0;">
+    <div id="favoritesList" style="display:flex;flex-direction:column;"></div>
+  </div>
+</div>
+  
+<!-- ===== PAGE: Beautify ===== -->
+<div class="page" id="pageBeautify">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>外观美化</h2>
+  </div>
+  <div class="page-body">
+    <div class="form-group">
+      <label>我的气泡颜色</label>
+      <input type="color" id="beautyUserBubble" value="#e8e8ed" style="width:100%;height:40px;border:1px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;">
+    </div>
+    
+    <div class="form-group">
+      <label>梦角气泡颜色</label>
+      <input type="color" id="beautyDreamBubble" value="#e8e8ed" style="width:100%;height:40px;border:1px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;">
+    </div>
+
+    <div class="form-group">
+      <label>聊天字体颜色</label>
+      <input type="color" id="beautyFontColor" value="#1d1d1f" style="width:100%;height:40px;border:1px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;">
+    </div>
+
+    <div class="form-group">
+      <label>气泡风格</label>
+      <select id="beautyBubbleStyle" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:12px;font-size:15px;outline:none;background:var(--card);color:var(--text);">
+        <option value="default">默认简约</option>
+        <option value="glass">半透明毛玻璃</option>
+        <option value="handdrawn">手绘描边风</option>
+      </select>
+    </div>
+
+    <!-- 字体大小 -->
+    <div class="form-group">
+      <label>全局字体大小 (<span id="fontSizeLabel">14</span>px)</label>
+      <input type="range" id="globalFontSize" min="12" max="20" value="14" oninput="document.getElementById('fontSizeLabel').textContent = this.value" style="width:100%;">
+    </div>
+
+    <!-- 主题颜色 -->
+    <div class="form-group">
+      <label>主题颜色</label>
+      <input type="color" id="themeColor" value="#007aff" style="width:100%;height:40px;border:1px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;">
+    </div>
+
+    <!-- 自定义CSS气泡 -->
+    <div class="form-group">
+        <div class="form-group">
+  <label>主屏幕背景</label>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <button class="btn-secondary" onclick="document.getElementById('homeBgInput').click()" style="flex:1;">选择图片</button>
+    <button class="btn-secondary" onclick="resetHomeBg()" style="width:80px;">清除</button>
+  </div>
+  <input type="file" id="homeBgInput" accept="image/*" style="display:none" onchange="handleHomeBg(event)">
+</div>
+      <label>自定义气泡CSS代码</label>
+      <textarea id="customBubbleCSS" placeholder="在此粘贴你的 CSS 代码" style="width:100%;height:100px;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:monospace;"></textarea>
+    </div>
+
+    <!-- 图标设置区域 -->
+    <div style="margin-top:20px; border-top:1px solid var(--border); padding-top:16px;">
+      <label style="font-size:14px;font-weight:600;color:var(--text);display:block;margin-bottom:8px;">图标设置</label>
+      <div id="iconSettingsGrid" class="icon-settings-grid"></div>
+    </div>
+
+    <button class="btn-primary" onclick="saveBeautySettings()" style="margin-top:16px;">保存美化设置</button>
+    <button class="btn-secondary" onclick="resetBeautySettings()" style="margin-top:8px;">恢复默认</button>
+  </div>
+</div>
+
+<!-- ===== PAGE: Settings ===== -->
+<div class="page" id="pageSettings">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>设置</h2>
+  </div>
+  <div class="page-body">
+           <div class="setting-item" style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="si-left">
+        <span class="si-label">回复延迟（秒）</span>
+        <span class="si-desc">最快几秒 ~ 最慢几秒</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input type="number" id="replyMinSec" min="0" max="60" value="3" style="width:52px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:14px;text-align:center;outline:none;">
+        <span style="font-size:13px;color:var(--gray);">~</span>
+        <input type="number" id="replyMaxSec" min="0" max="120" value="7" style="width:52px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:14px;text-align:center;outline:none;">
+      </div>
+    </div>
+
+    <div class="setting-item" style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="si-left">
+        <span class="si-label">主动找我</span>
+        <span class="si-desc">你多久不理他，他就主动发消息</span>
+      </div>
+      <select id="autoMessageSelect" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:14px;outline:none;">
+        <option value="0">关闭</option>
+        <option value="300000">5分钟</option>
+        <option value="900000">15分钟</option>
+        <option value="1800000">30分钟</option>
+        <option value="3600000">1小时</option>
+      </select>
+    </div>
+    <div class="setting-item" onclick="document.getElementById('callBgInput').click()">
+      <div class="si-left">
+        <span class="si-label">语音通话背景</span>
+        <span class="si-desc">自定义通话背景图</span>
+      </div>
+      <div class="si-right">›</div>
+      <input type="file" id="callBgInput" accept="image/*" onchange="handleCallBg(event)">
+    </div>
+    <div class="setting-item" onclick="document.getElementById('checkinBgInput').click()">
+      <div class="si-left">
+        <span class="si-label">查岗弹窗背景</span>
+        <span class="si-desc">自定义查岗背景图</span>
+      </div>
+      <div class="si-right">›</div>
+      <input type="file" id="checkinBgInput" accept="image/*" onchange="handleCheckinBg(event)">
+    </div>
+    <div class="setting-item" onclick="backupData()">
+      <div class="si-left">
+        <span class="si-label">备份数据</span>
+        <span class="si-desc">导出数据到文件</span>
+      </div>
+      <div class="si-right">›</div>
+    </div>
+    <div class="setting-item" onclick="document.getElementById('restoreInput').click()">
+      <div class="si-left">
+        <span class="si-label">从备份导入</span>
+        <span class="si-desc">恢复数据</span>
+      </div>
+      <div class="si-right">›</div>
+      <input type="file" id="restoreInput" accept=".json" onchange="restoreData(event)">
+    </div>
+    <div class="setting-item">
+      <div class="si-left">
+        <span class="si-label">后台消息推送</span>
+        <span class="si-desc">接收梦角的消息通知</span>
+      </div>
+      <div class="setting-toggle" id="pushToggle">
+        <div class="toggle-knob"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Voice Call Overlay ===== -->
+<div class="overlay call-overlay" id="callOverlay">
+  <div class="overlay-bg"></div>
+  <div class="call-card" id="callCard">
+    <img class="call-avatar" id="callAvatar" src="" alt="avatar">
+    <div class="call-name" id="callName">沈屿</div>
+    <div class="call-status" id="callStatus">来电中…</div>
+    <div class="call-timer" id="callTimer">00:00:00</div>
+    <div class="call-buttons" id="callButtons">
+      <button class="call-btn hangup" onclick="hangupCall()">☎</button>
+      <button class="call-btn answer" onclick="answerCall()">📞</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Call Minimized ===== -->
+<div class="call-mini" id="callMini" onclick="expandCall()">
+  <img class="mini-avatar" id="miniAvatar" src="" alt="">
+  <span class="mini-time" id="miniTime">00:00</span>
+</div>
+
+<!-- ===== Check-in Overlay ===== -->
+<div class="overlay checkin-overlay" id="checkinOverlay">
+  <div class="overlay-bg"></div>
+  <div class="checkin-card" id="checkinCard">
+    <div class="ci-header">
+      <img class="ci-avatar" id="ciAvatar" src="" alt="">
+      <span class="ci-name" id="ciName">沈屿</span>
+      <button class="ci-close" onclick="closeCheckin()">✕</button>
+    </div>
+    <div class="ci-messages" id="ciMessages"></div>
+  </div>
+</div>
+
+  <div id="statsMask" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:700;"></div>
+<div id="callSelectMask" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:800;"></div>
+<div id="callSelectPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:88%;max-width:340px;max-height:70vh;background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:801;overflow-y:auto;padding:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <span style="font-weight:600;font-size:16px;">选择通话对象</span>
+    <span onclick="closeCallSelect()" style="cursor:pointer;font-size:22px;color:#999;line-height:1;">×</span>
+  </div>
+  <div id="callSelectList" style="margin-bottom:16px;"></div>
+  <button onclick="confirmCallSelect()" style="width:100%;padding:12px;border:none;border-radius:12px;background:#007aff;color:#fff;font-size:15px;font-weight:500;cursor:pointer;">拨打</button>
+</div>
+
+<!-- ===== 状态检测面板 ===== -->
+<div id="statusMask" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:700;"></div>
+<div id="statusPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:88%;max-width:340px;max-height:80vh;background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:701;overflow-y:auto;padding:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <span style="font-weight:600;font-size:16px;">状态检测</span>
+    <span onclick="closeStatusCheck()" style="cursor:pointer;font-size:22px;color:#999;line-height:1;">×</span>
+  </div>
+  <div id="statusContent"></div>
+</div>
+
+<!-- ===== 状态检测：群聊选人 ===== -->
+<div id="statusPickMask" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:800;"></div>
+<div id="statusPickPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:88%;max-width:340px;max-height:70vh;background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:801;overflow-y:auto;padding:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <span style="font-weight:600;font-size:16px;">选择检测对象</span>
+    <span onclick="closeStatusPick()" style="cursor:pointer;font-size:22px;color:#999;line-height:1;">×</span>
+  </div>
+  <div id="statusPickList" style="display:flex;flex-direction:column;gap:8px;"></div>
+</div>
+
+  <div id="statsPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:88%;max-width:340px;max-height:75vh;background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:701;overflow-y:auto;padding:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <span style="font-weight:600;font-size:16px;">消息统计</span>
+    <span onclick="closeStats()" style="cursor:pointer;font-size:22px;color:#999;line-height:1;">×</span>
+  </div>
+  <div id="statsContent"></div>
+</div>
+  <div id="msgMenuMask" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:499;background:transparent;"></div>
+  <div id="msgMenu" style="display:none;position:fixed;z-index:500;background:#fff;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,0.18);padding:4px;align-items:center;gap:2px;border:1px solid rgba(0,0,0,0.06);"></div>
+  
+<!-- ===== 纪念日设置面板 ===== -->
+<div id="anniMask" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:700;"></div>
+<div id="anniPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:88%;max-width:340px;max-height:80vh;background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:701;overflow-y:auto;padding:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <span style="font-weight:600;font-size:16px;">纪念日</span>
+    <span onclick="closeAnniPanel()" style="cursor:pointer;font-size:22px;color:#999;line-height:1;">×</span>
+  </div>
+  <div id="anniPanelContent"></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
