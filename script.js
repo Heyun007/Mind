@@ -75,7 +75,21 @@ const ICONS_CONFIG = [
 var APP_PER_PAGE = 24; // 每页 4×6
 
 function initAppPages() {
-  if (state.appPages && Array.isArray(state.appPages) && state.appPages.length > 0) return;
+  // 如果已有数据，先检查有没有被拖拽 bug 弄丢图标
+  if (state.appPages && Array.isArray(state.appPages) && state.appPages.length > 0) {
+    var allKeys = ICONS_CONFIG.map(function(item) { return item.key; });
+    var foundKeys = [];
+    state.appPages.forEach(function(pageKeys) {
+      if (!Array.isArray(pageKeys)) return;
+      pageKeys.forEach(function(k) {
+        if (k && allKeys.indexOf(k) > -1 && foundKeys.indexOf(k) === -1) foundKeys.push(k);
+      });
+    });
+    // 所有图标都在 → 数据正常，保留用户排列
+    if (foundKeys.length === allKeys.length) return;
+    // 有图标丢失 → 数据被 bug 弄坏了，重置为默认排列
+    state.appPages = null;
+  }
   var keys = ICONS_CONFIG.map(function(item) { return item.key; });
   var pages = [];
   for (var i = 0; i < keys.length; i += APP_PER_PAGE) {
@@ -4861,31 +4875,40 @@ function endAppDrag(e) {
 function bindAppDrag() {
   var icons = document.querySelectorAll('.app-icon[data-app-key]');
   icons.forEach(function(iconEl) {
-    var longPressed = false;
+    var pressTimer = null;
+    var startX = 0, startY = 0;
+    var isLongPressing = false;
 
     function onDown(e) {
-      longPressed = false;
-      // 长按检测
-      appPressTimer = setTimeout(function() {
-        longPressed = true;
+      isLongPressing = false;
+      startX = e.touches ? e.touches[0].clientX : e.clientX;
+      startY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      pressTimer = setTimeout(function() {
+        isLongPressing = true;
         if (!window.appEditMode) enterAppEditMode();
-        // 进入编辑模式后，立即开始拖拽
         startAppDrag(e, iconEl);
-      }, 600);
+      }, 800);
     }
 
     function onUp(e) {
-      clearTimeout(appPressTimer);
+      clearTimeout(pressTimer);
+      if (isLongPressing && appDragState) endAppDrag(e);
+      isLongPressing = false;
     }
 
     function onMove(e) {
-      // 如果在拖动中，交给 moveAppDrag
-      if (appDragState) {
-        moveAppDrag(e);
-      } else {
-        // 移动了就取消长按
-        clearTimeout(appPressTimer);
+      var cx = e.touches ? e.touches[0].clientX : e.clientX;
+      var cy = e.touches ? e.touches[0].clientY : e.clientY;
+
+      // 【核心修复】：如果还没进入长按，只要手指移动超过 5px 就取消长按
+      if (!isLongPressing) {
+        if (Math.abs(cx - startX) > 5 || Math.abs(cy - startY) > 5) {
+          clearTimeout(pressTimer);
+        }
+        return;
       }
+      if (appDragState) moveAppDrag(e);
     }
 
     iconEl.addEventListener('touchstart', onDown, { passive: true });
