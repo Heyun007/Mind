@@ -3804,15 +3804,17 @@ function renderCallUI() {
   }
 
   var session = state.callSession;
-  // 【修复1】过滤掉空 id，防止幽灵成员“沈屿”出现
-  var participants = session.participants.filter(function(id) { return id && id !== 'user'; });
+  // 【修复1】严格过滤掉一切不是真实梦角的空数据
+  var participants = session.participants.filter(function(id) {
+    return id && id !== 'user' && id !== 'undefined' && id !== 'null';
+  });
 
   var olds = card.querySelectorAll('.multi-avatars');
   for (var i = 0; i < olds.length; i++) olds[i].remove();
 
   var avatarsHtml = '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">';
   var showList = participants.length > 0 ? participants : (session.invited || []);
-  showList = showList.filter(function(id){ return id && id !== 'user'; });
+  showList = showList.filter(function(id){ return id && id !== 'user' && id !== 'undefined' && id !== 'null'; });
   showList.forEach(function(id) {
     var av = getDreamAvatar(id);
     avatarsHtml += '<div style="text-align:center;"><img src="' + av + '" style="width:50px;height:50px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.3);"><div style="font-size:11px;color:#fff;margin-top:4px;">' + getDreamName(id) + '</div></div>';
@@ -3825,6 +3827,23 @@ function renderCallUI() {
   var originalAvatar = card.querySelector('.call-avatar');
   if (originalAvatar) originalAvatar.style.display = 'none';
   card.insertBefore(div, card.firstChild);
+
+  // 【修复2】动态更新中间的名字，干掉“沈屿”
+  var callNameEl = document.getElementById('callName');
+  if (callNameEl) {
+    if (participants.length === 0) {
+      if (session.invited && session.invited.length > 0) {
+        var names = session.invited.map(getDreamName).join('、');
+        callNameEl.textContent = '正在呼叫 ' + names;
+      } else {
+        callNameEl.textContent = '正在呼叫…';
+      }
+    } else if (participants.length === 1) {
+      callNameEl.textContent = getDreamName(participants[0]);
+    } else {
+      callNameEl.textContent = '多人通话';
+    }
+  }
 
   var statusEl = document.getElementById('callStatus');
   if (statusEl) {
@@ -6043,6 +6062,18 @@ function endAICall(session, group) {
   if (session.startTime) dur = Math.floor((Date.now() - session.startTime) / 1000);
   addSystemMessage(group.id, '通话结束，时长 ' + formatDuration(dur).slice(3));
   saveState();
+
+  // 【核心修复】如果用户还在这个通话界面上，强行帮用户关掉！
+  if (state.callSession && state.callSession.id === session.id) {
+    state.callSession = null;
+    state.callState = 'idle';
+    if (state.callTimerInterval) { clearInterval(state.callTimerInterval); state.callTimerInterval = null; }
+    var ov = document.getElementById('callOverlay');
+    if (ov) ov.classList.remove('active');
+    var mini = document.getElementById('callMini');
+    if (mini) mini.classList.remove('show');
+    renderCallUI();
+  }
 }
 
 function joinActiveCallFromBanner() {
