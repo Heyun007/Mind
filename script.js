@@ -6033,8 +6033,11 @@ function joinActiveCallFromBanner() {
     if (c.chatId === state.currentChatId && c.participants.indexOf('user') === -1) {
       bannerCall = c; break;
     }
+  }
+  if (bannerCall) joinActiveCall(bannerCall.id);
+}
 
-    // ===== 首次进入欢迎面板 =====
+// ===== 首次进入欢迎面板 =====
 function showWelcomeIfFirstTime() {
   try {
     if (!localStorage.getItem('mind_welcome_shown')) {
@@ -6054,6 +6057,3 @@ function closeWelcome() {
 window.addEventListener('load', function() {
   setTimeout(showWelcomeIfFirstTime, 300);
 });
-  }
-  if (bannerCall) joinActiveCall(bannerCall.id);
-}
