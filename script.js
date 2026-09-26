@@ -1354,7 +1354,17 @@ if (Math.random() < 0.05) {
     usePoke = true;
   }
   
-  
+  // 决定发字卡还是表情包
+var hasCards = cards.length > 0;
+var hasStickers = stickers.length > 0;
+if (hasCards && hasStickers) {
+  if (Math.random() < 0.85) useCard = true; else useSticker = true;
+} else if (hasCards) {
+  useCard = true;
+} else if (hasStickers) {
+  useSticker = true;
+}
+
   // 【核心修复】：优先处理拍一拍
 if (usePoke) {
   var pokeText = state.pokes[Math.floor(Math.random() * state.pokes.length)];
