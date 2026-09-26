@@ -1463,6 +1463,26 @@ function renderChat() {
     if (d) document.getElementById('chatHeaderName').textContent = d.name;
   }
 
+    // ===== 更新通话横条 =====
+  var banner = document.getElementById('activeCallBanner');
+  if (banner) {
+    var bannerCall = null;
+    if (state.currentChatId && state.currentChatId.startsWith('group_') && state.activeCalls) {
+      for (var bi = 0; bi < state.activeCalls.length; bi++) {
+        var c = state.activeCalls[bi];
+        if (c.chatId === state.currentChatId && c.participants.indexOf('user') === -1) {
+          bannerCall = c; break;
+        }
+      }
+    }
+    if (bannerCall) {
+      var names = bannerCall.participants.map(function(id) { return getDreamName(id); }).join('、');
+      document.getElementById('activeCallBannerText').textContent = '📞 ' + names + ' 正在通话中';
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
   renderChatMessages();
 }
 
@@ -3500,7 +3520,8 @@ function addSystemMessage(chatId, text) {
   saveState();
   if (state.currentChatId === chatId) {
     loadChatMessages();
-    renderChatMessages();
+    // 刷新横条 + 聊天
+    try { renderChat(); } catch(e) { renderChatMessages(); }
   }
   renderChatList();
 }
@@ -5929,4 +5950,16 @@ function endAICall(session, group) {
   if (session.startTime) dur = Math.floor((Date.now() - session.startTime) / 1000);
   addSystemMessage(group.id, '通话结束，时长 ' + formatDuration(dur).slice(3));
   saveState();
+}
+
+function joinActiveCallFromBanner() {
+  if (!state.activeCalls || !state.currentChatId) return;
+  var bannerCall = null;
+  for (var i = 0; i < state.activeCalls.length; i++) {
+    var c = state.activeCalls[i];
+    if (c.chatId === state.currentChatId && c.participants.indexOf('user') === -1) {
+      bannerCall = c; break;
+    }
+  }
+  if (bannerCall) joinActiveCall(bannerCall.id);
 }
