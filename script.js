@@ -1246,17 +1246,22 @@ function dreamReply() {
     var g = state.groups.find(function(item) { return item.id === state.currentChatId; });
     if (g) {
       checkExpiredMutes(g);
-            // AI 主动发起群聊通话（概率 5%）
+                  // AI 主动发起群聊通话（25% 概率）
       if (Math.random() < 0.25 && state.activeCalls.length < 3) {
-        var initiatorId = g.memberIds[Math.floor(Math.random() * g.memberIds.length)];
-        if (initiatorId && String(initiatorId) !== 'user') {
+        // 发起人必须不在任何通话中
+        var idleCandidates = g.memberIds.filter(function(id) {
+          return String(id) !== 'user' && !isDreamBusy(id);
+        });
+        if (idleCandidates.length > 0) {
+          var initiatorId = idleCandidates[Math.floor(Math.random() * idleCandidates.length)];
           var initiator = state.dreams.find(function(d) { return d.id === initiatorId; });
           if (initiator) {
+            // 被邀请人必须不在任何通话中
             var candidates = g.memberIds.filter(function(id) {
-              return String(id) !== String(initiatorId) && String(id) !== 'user';
+              return String(id) !== String(initiatorId) && String(id) !== 'user' && !isDreamBusy(id);
             });
             if (candidates.length > 0) {
-              var inviteCount = Math.min(candidates.length, 1 + Math.floor(Math.random() * 3));
+              var inviteCount = Math.min(candidates.length, 1 + Math.floor(Math.random() * 2));
               var invited = [];
               for (var i = 0; i < inviteCount; i++) {
                 var pick = candidates.splice(Math.floor(Math.random() * candidates.length), 1)[0];
@@ -1464,13 +1469,16 @@ function renderChat() {
   }
 
     // ===== 更新通话横条 =====
+    // ===== 更新通话横条（只有被邀请才显示） =====
   var banner = document.getElementById('activeCallBanner');
   if (banner) {
     var bannerCall = null;
     if (state.currentChatId && state.currentChatId.startsWith('group_') && state.activeCalls) {
       for (var bi = 0; bi < state.activeCalls.length; bi++) {
         var c = state.activeCalls[bi];
-        if (c.chatId === state.currentChatId && c.participants.indexOf('user') === -1) {
+        if (c.chatId === state.currentChatId &&
+            c.participants.indexOf('user') === -1 &&
+            c.invited && c.invited.indexOf('user') > -1) {
           bannerCall = c; break;
         }
       }
@@ -1483,8 +1491,6 @@ function renderChat() {
       banner.style.display = 'none';
     }
   }
-  renderChatMessages();
-}
 
 function renderChatMessages() {
   if (!chatMessages || !Array.isArray(chatMessages)) chatMessages = [];
@@ -1606,7 +1612,9 @@ function renderChatMessages() {
   var activeCallInGroup = null;
   if (state.currentChatId && state.currentChatId.startsWith('group_') && state.activeCalls) {
     activeCallInGroup = state.activeCalls.find(function(c) {
-      return c.chatId === state.currentChatId && c.participants.indexOf('user') === -1;
+      return c.chatId === state.currentChatId &&
+             c.participants.indexOf('user') === -1 &&
+             c.invited && c.invited.indexOf('user') > -1;
     });
   }
   if (activeCallInGroup) {
@@ -5921,13 +5929,27 @@ function startAICallSimulation(session, group) {
         addSystemMessage(group.id, '「' + getDreamName(joiner) + '」加入了通话');
       }
     }
-    // 15% AI 邀请用户加入（前提是用户不在通话里）
+    // 15% AI 邀请用户加入（前提是用户不在通话里，且还没邀请过）
     else if (roll < 0.70) {
-      if (session.participants.indexOf('user') === -1 && aiParts.length > 0) {
+      if (session.participants.indexOf('user') === -1 && aiParts.length > 0 && !session.userInvited) {
         var inviter = aiParts[Math.floor(Math.random() * aiParts.length)];
-        // 检查用户当前是否正忙
         if (state.callState === 'idle') {
+          session.userInvited = true;
+          if (!session.invited) session.invited = [];
+          if (session.invited.indexOf('user') === -1) session.invited.push('user');
           addSystemMessage(group.id, '「' + getDreamName(inviter) + '」邀请你加入通话');
+          // 用 setTimeout 让渲染先跑完，再弹确认框
+          setTimeout(function() {
+            var userConfirmed = confirm('「' + getDreamName(inviter) + '」邀请你加入通话，是否加入？');
+            if (userConfirmed) {
+              joinActiveCall(session.id);
+            } else {
+              var ui = session.invited.indexOf('user');
+              if (ui > -1) session.invited.splice(ui, 1);
+              addSystemMessage(group.id, '你拒绝了通话邀请');
+              saveState();
+            }
+          }, 100);
         }
       }
     }
