@@ -1492,32 +1492,8 @@ function renderChat() {
     }
   }
 
-  renderChatMessages();
-}
-
-    // ===== 更新通话横条 =====
-    // ===== 更新通话横条（只有被邀请才显示） =====
-  var banner = document.getElementById('activeCallBanner');
-  if (banner) {
-    var bannerCall = null;
-    if (state.currentChatId && state.currentChatId.startsWith('group_') && state.activeCalls) {
-      for (var bi = 0; bi < state.activeCalls.length; bi++) {
-        var c = state.activeCalls[bi];
-        if (c.chatId === state.currentChatId &&
-            c.participants.indexOf('user') === -1 &&
-            c.invited && c.invited.indexOf('user') > -1) {
-          bannerCall = c; break;
-        }
-      }
-    }
-    if (bannerCall) {
-      var names = bannerCall.participants.map(function(id) { return getDreamName(id); }).join('、');
-      document.getElementById('activeCallBannerText').textContent = '📞 ' + names + ' 正在通话中';
-      banner.style.display = 'flex';
-    } else {
-      banner.style.display = 'none';
-    }
-  }
+  renderChatMessages(); // 
+} // 
 
 function renderChatMessages() {
   if (!chatMessages || !Array.isArray(chatMessages)) chatMessages = [];
