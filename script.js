@@ -6033,6 +6033,27 @@ function joinActiveCallFromBanner() {
     if (c.chatId === state.currentChatId && c.participants.indexOf('user') === -1) {
       bannerCall = c; break;
     }
+
+    // ===== 首次进入欢迎面板 =====
+function showWelcomeIfFirstTime() {
+  try {
+    if (!localStorage.getItem('mind_welcome_shown')) {
+      var el = document.getElementById('welcomeOverlay');
+      if (el) el.style.display = 'flex';
+    }
+  } catch(e) {}
+}
+
+function closeWelcome() {
+  var el = document.getElementById('welcomeOverlay');
+  if (el) el.style.display = 'none';
+  try { localStorage.setItem('mind_welcome_shown', '1'); } catch(e) {}
+}
+
+// 等页面加载后自动检查
+window.addEventListener('load', function() {
+  setTimeout(showWelcomeIfFirstTime, 300);
+});
   }
   if (bannerCall) joinActiveCall(bannerCall.id);
 }
