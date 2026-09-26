@@ -881,7 +881,7 @@ function triggerRandomEvent() {
   var r = Math.random();
   if (r < 0.05) {
   if (state.callState === 'idle') triggerCall();
-} else if (r < 0.275) {
+} else if (r < 0.075) {
   if (state.callState === 'idle') triggerCheckin();
 } else {
     var allCards = state.cards || [];
@@ -1320,7 +1320,7 @@ if (Math.random() < 0.05) {
   }
 }
       
-      if (g.ownerId !== 'user' && Math.random() < 0.15) {
+      if (g.ownerId !== 'user' && Math.random() < 0.4) {
         aiGroupOwnerAction(g);
         return; 
       }
@@ -1436,6 +1436,7 @@ function aiGroupOwnerAction(g) {
   if (!owner) return;
 
   var otherMembers = g.memberIds.filter(function(id) { return String(id) !== String(g.ownerId); });
+  if (Math.random() < 1) otherMembers.push('user');
   var availableDreams = state.dreams.filter(function(d) { return !g.memberIds.includes(d.id); });
 
   var action = Math.random();
@@ -1454,16 +1455,16 @@ function aiGroupOwnerAction(g) {
     if (!target) return;
 
     // 让 AI 有概率把群主转让给用户
-if (Math.random() < 0.2) otherMembers.push('user');
+if (Math.random() < 1) otherMembers.push('user');
     var subAction = Math.random();
-    if (subAction < 0.4) {
+    if (subAction < 0.25) {
       if (!g.muteEndsAt) g.muteEndsAt = {};
       if (g.muteEndsAt[String(targetId)] !== undefined) return; 
       var durations = [5, 10, 15, 30];
       var mins = durations[Math.floor(Math.random() * durations.length)];
       g.muteEndsAt[String(targetId)] = Date.now() + mins * 60 * 1000; // 强制转字符串
       sysText = '群主「' + owner.name + '」禁言了「' + target.name + '」' + mins + '分钟';
-    } else if (subAction < 0.8) {
+    } else if (subAction < 0.5) {
       g.memberIds = g.memberIds.filter(function(id) { return String(id) !== String(targetId); });
       if (g.muteEndsAt) delete g.muteEndsAt[String(targetId)];
       sysText = '群主「' + owner.name + '」将「' + target.name + '」移出了群聊';
