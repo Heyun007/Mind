@@ -1281,22 +1281,28 @@ function dreamReply() {
     if (g) {
       checkExpiredMutes(g);
             // 5% 概率有成员主动退群
-      if (Math.random() < 0.05) {
-        var candidates = g.memberIds.filter(function(id) {
-          return String(id) !== String(g.ownerId);
-        });
-        if (candidates.length > 0) {
-          var leaverId = candidates[Math.floor(Math.random() * candidates.length)];
-          var leaver = state.dreams.find(function(d) { return d.id === leaverId; });
-          if (leaver) {
-            g.memberIds = g.memberIds.filter(function(id) { return String(id) !== String(leaverId); });
-            if (g.muteEndsAt) delete g.muteEndsAt[String(leaverId)];
-            if (!state.chatSessions[g.id]) state.chatSessions[g.id] = [];
-            state.chatSessions[g.id].push({ from: 'system', text: '「' + leaver.name + '」主动退出了群聊', time: Date.now() });
-            saveState();
-          }
-        }
+if (Math.random() < 0.05) {
+  var candidates = g.memberIds.filter(function(id) {
+    return String(id) !== String(g.ownerId);
+  });
+  if (candidates.length > 0) {
+    var leaverId = candidates[Math.floor(Math.random() * candidates.length)];
+    var leaver = state.dreams.find(function(d) { return d.id === leaverId; });
+    if (leaver) {
+      g.memberIds = g.memberIds.filter(function(id) { return String(id) !== String(leaverId); });
+      if (g.muteEndsAt) delete g.muteEndsAt[String(leaverId)];
+      if (!state.chatSessions[g.id]) state.chatSessions[g.id] = [];
+      state.chatSessions[g.id].push({ from: 'system', text: '「' + leaver.name + '」主动退出了群聊', time: Date.now() });
+      saveState();
+      // 【核心修复】：立刻刷新界面，并弹个小提示
+      if (state.currentChatId === g.id) {
+        loadChatMessages();
+        renderChatMessages();
       }
+      showToast('「' + leaver.name + '」退出了群聊');
+    }
+  }
+}
       
       if (g.ownerId !== 'user' && Math.random() < 0.15) {
         aiGroupOwnerAction(g);
