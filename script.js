@@ -3591,7 +3591,7 @@ function confirmCallSelect() {
 function startUserDial(targetIds, isGroup) {
   if (state.callState !== 'idle') { showToast('正在通话中'); return; }
   if (!targetIds || targetIds.length === 0) { showToast('未选择通话对象'); return; }
-  
+
   // 检查忙线
   var busy = targetIds.filter(function(id) { return isDreamBusy(id); });
   if (busy.length > 0) {
@@ -3606,8 +3606,8 @@ function startUserDial(targetIds, isGroup) {
     chatId: state.currentChatId,
     type: isGroup ? 'group' : 'private',
     initiator: 'user',
-    participants: ['user'],
-    invited: targetIds.slice(),
+    participants: ['user'],   // 只有用户先在里面
+    invited: targetIds.slice(), // 邀请的人
     startTime: null,
     status: 'dialing',
     userInCall: true
@@ -3617,45 +3617,66 @@ function startUserDial(targetIds, isGroup) {
   state.callState = 'dialing';
   renderCallUI();
 
+  var connectedOnce = false;
+  var pendingCount = targetIds.length;
+
+  function checkAllDone() {
+    // 所有人都处理完了，且一个都没接，就结束通话
+    if (pendingCount === 0 && session.participants.length <= 1 && !session.startTime) {
+      endCallSession('对方已拒绝');
+    }
+  }
+
+  // 给每个人独立抽签
   targetIds.forEach(function(id) {
     var roll = Math.random();
+
     if (roll < 0.65) {
+      // ===== 接听 =====
+      var delay = 1000 + Math.random() * 2500;
       setTimeout(function() {
         if (state.activeCalls.indexOf(session) === -1) return;
-        if (session.invited.indexOf(id) > -1) {
-          session.participants.push(id);
-          session.invited.splice(session.invited.indexOf(id), 1);
-          addSystemMessage(session.chatId, '「' + getDreamName(id) + '」加入了通话');
-          if (!session.startTime) {
-            session.startTime = Date.now();
-            session.status = 'connected';
-            state.callState = 'connected';
-            startCallTimer();
-          }
-          renderCallUI();
+        if (session.invited.indexOf(id) === -1) return; // 已被处理过
+        session.invited.splice(session.invited.indexOf(id), 1);
+        session.participants.push(id);
+        addSystemMessage(session.chatId, '「' + getDreamName(id) + '」加入了通话');
+
+        // 第一个人接了，正式开始计时
+        if (!session.startTime) {
+          session.startTime = Date.now();
+          session.status = 'connected';
+          state.callState = 'connected';
+          startCallTimer();
+          connectedOnce = true;
         }
-      }, 1000 + Math.random() * 2000);
+        renderCallUI();
+        pendingCount--;
+        checkAllDone();
+      }, delay);
+
     } else if (roll < 0.85) {
+      // ===== 拒绝 =====
+      var delay2 = 1000 + Math.random() * 2000;
       setTimeout(function() {
         if (state.activeCalls.indexOf(session) === -1) return;
-        if (session.invited.indexOf(id) > -1) {
-          session.invited.splice(session.invited.indexOf(id), 1);
-          addSystemMessage(session.chatId, '「' + getDreamName(id) + '」拒绝了通话');
-          if (session.participants.length === 1 && session.invited.length === 0) {
-            endCallSession('对方已拒绝');
-          }
-        }
-      }, 1000 + Math.random() * 1500);
+        if (session.invited.indexOf(id) === -1) return;
+        session.invited.splice(session.invited.indexOf(id), 1);
+        addSystemMessage(session.chatId, '「' + getDreamName(id) + '」拒绝了通话');
+        renderCallUI();
+        pendingCount--;
+        checkAllDone();
+      }, delay2);
+
     } else {
+      // ===== 超时 =====
       setTimeout(function() {
         if (state.activeCalls.indexOf(session) === -1) return;
-        if (session.invited.indexOf(id) > -1) {
-          session.invited.splice(session.invited.indexOf(id), 1);
-          addSystemMessage(session.chatId, '「' + getDreamName(id) + '」无应答');
-          if (session.participants.length === 1 && session.invited.length === 0) {
-            endCallSession('对方无应答');
-          }
-        }
+        if (session.invited.indexOf(id) === -1) return;
+        session.invited.splice(session.invited.indexOf(id), 1);
+        addSystemMessage(session.chatId, '「' + getDreamName(id) + '」无应答');
+        renderCallUI();
+        pendingCount--;
+        checkAllDone();
       }, 15000);
     }
   });
