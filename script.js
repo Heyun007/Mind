@@ -1408,6 +1408,8 @@ function aiGroupOwnerAction(g) {
     target = state.dreams.find(function(d) { return d.id === targetId; });
     if (!target) return;
 
+    // 让 AI 有概率把群主转让给用户
+if (Math.random() < 0.2) otherMembers.push('user');
     var subAction = Math.random();
     if (subAction < 0.4) {
       if (!g.muteEndsAt) g.muteEndsAt = {};
