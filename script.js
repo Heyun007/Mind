@@ -3843,7 +3843,6 @@ function renderDiaryList() {
     return;
   }
 
-  // 按时间倒序
   var sorted = state.diaries.slice().sort(function(a, b) { return b.time - a.time; });
 
   container.innerHTML = sorted.map(function(d) {
@@ -3870,19 +3869,20 @@ function renderDiaryList() {
     }
 
     return `
-      <div style="background:var(--card);margin:10px 12px;padding:16px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);">
+      <div style="background:var(--card);margin:10px 12px;padding:16px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);position:relative;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
           <img src="${avatar}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">
           <div style="flex:1;">
             <div style="font-size:14px;font-weight:600;color:var(--text);">${d.authorName}</div>
             <div style="font-size:11px;color:var(--gray);">${dateStr} ${timeStr}</div>
           </div>
+          <span onclick="deleteDiary('${d.id}')" style="font-size:12px;color:var(--red);cursor:pointer;padding:4px 8px;border-radius:8px;user-select:none;background:rgba(255,59,48,0.1);">🗑 删除</span>
         </div>
         <div style="display:flex;gap:6px;margin-bottom:10px;">
           <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">🌤 ${d.weather}</span>
           <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">💭 ${d.mood}</span>
         </div>
-               <div style="font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${d.text}</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${d.text}</div>
         <div style="margin-top:12px;">
           <span onclick="openDiaryComment('${d.id}')" style="font-size:12px;color:var(--blue);cursor:pointer;padding:4px 0;">💬 评论</span>
         </div>
@@ -3890,6 +3890,14 @@ function renderDiaryList() {
       </div>
     `;
   }).join('');
+}
+
+function deleteDiary(id) {
+  if (!confirm('确定删除这篇日记吗？此操作不可恢复！')) return;
+  state.diaries = state.diaries.filter(function(d) { return d.id !== id; });
+  saveState();
+  renderDiaryList();
+  showToast('日记已删除');
 }
 
 // 打开写日记页面
@@ -4613,7 +4621,6 @@ function renderMailList() {
   });
   filtered.sort(function(a, b) { return b.sentAt - a.sentAt; });
 
-  // 更新未读徽标
   var unreadCount = state.mails.filter(function(m) { return m.from !== 'user' && !m.read; }).length;
   var badge = document.getElementById('mailUnreadBadge');
   if (badge) {
@@ -4632,7 +4639,6 @@ function renderMailList() {
     var statusHtml = '';
     var dotHtml = '';
     if (m.from === 'user') {
-      // 发件箱显示送达状态
       if (m.delivered) statusHtml = '<span style="font-size:11px;color:var(--green);">已送达</span>';
       else {
         var left = Math.max(0, m.deliverAt - Date.now());
@@ -4641,7 +4647,6 @@ function renderMailList() {
         statusHtml = '<span style="font-size:11px;color:var(--gray);">运送中 · 剩 ' + hLeft + 'h' + mLeft + 'm</span>';
       }
     } else {
-      // 收件箱显示未读红点
       if (!m.read) {
         dotHtml = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff3b30;margin-right:6px;vertical-align:middle;"></span>';
       }
@@ -4650,15 +4655,26 @@ function renderMailList() {
     var whoText = m.from === 'user' ? ('寄给 ' + m.toName) : ('来自 ' + m.fromName);
     var preview = m.content.replace(/\n/g, ' ').slice(0, 30);
 
-    return '<div onclick="openLetterDetail(\'' + m.id + '\')" style="padding:14px 16px;border-bottom:1px solid var(--border);background:var(--card);cursor:pointer;">' +
+    return '<div onclick="openLetterDetail(\'' + m.id + '\')" style="padding:14px 16px;border-bottom:1px solid var(--border);background:var(--card);cursor:pointer;position:relative;">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
         '<span style="font-size:14px;font-weight:600;color:var(--text);">' + dotHtml + whoText + '</span>' +
-        statusHtml +
+        '<div style="display:flex;align-items:center;">' +
+          statusHtml +
+          '<span onclick="event.stopPropagation();deleteMail(\'' + m.id + '\')" style="font-size:12px;color:var(--red);cursor:pointer;padding:4px 8px;margin-left:8px;border-radius:8px;background:rgba(255,59,48,0.1);user-select:none;">🗑 删除</span>' +
+        '</div>' +
       '</div>' +
       '<div style="font-size:13px;color:var(--gray);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + preview + '</div>' +
       '<div style="font-size:11px;color:#bbb;margin-top:4px;">' + timeStr + '</div>' +
     '</div>';
   }).join('');
+}
+
+function deleteMail(id) {
+  if (!confirm('确定删除这封信吗？此操作不可恢复！')) return;
+  state.mails = state.mails.filter(function(m) { return m.id !== id; });
+  saveState();
+  renderMailList();
+  showToast('信件已删除');
 }
 
 // 打开信件详情
