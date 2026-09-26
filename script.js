@@ -40,6 +40,7 @@ let state = {
     { id: 'c5', text: '过来，让我抱抱。', cat: 'default' },
   ],
   callHistory: [],
+  activeCalls: [], // 所有正在进行的通话（包括AI发起的）
   checkinHistory: [],
   settings: { callBg: null, checkinBg: null, pushEnabled: false, customIcons: {} },
   callState: 'idle',
@@ -1280,6 +1281,51 @@ function dreamReply() {
     var g = state.groups.find(function(item) { return item.id === state.currentChatId; });
     if (g) {
       checkExpiredMutes(g);
+            // AI 主动发起群聊通话（概率 5%）
+      if (Math.random() < 0.05 && state.activeCalls.length < 3) {
+        var initiatorId = g.memberIds[Math.floor(Math.random() * g.memberIds.length)];
+        if (initiatorId && String(initiatorId) !== 'user') {
+          var initiator = state.dreams.find(function(d) { return d.id === initiatorId; });
+          if (initiator) {
+            var candidates = g.memberIds.filter(function(id) {
+              return String(id) !== String(initiatorId) && String(id) !== 'user';
+            });
+            if (candidates.length > 0) {
+              var inviteCount = Math.min(candidates.length, 1 + Math.floor(Math.random() * 3));
+              var invited = [];
+              for (var i = 0; i < inviteCount; i++) {
+                var pick = candidates.splice(Math.floor(Math.random() * candidates.length), 1)[0];
+                invited.push(pick);
+              }
+              if (invited.length > 0) {
+                var session = {
+                  id: 'call_' + Date.now(),
+                  chatId: g.id,
+                  type: 'group',
+                  initiator: initiatorId,
+                  participants: [initiatorId].concat(invited),
+                  invited: [],
+                  startTime: Date.now(),
+                  status: 'connected',
+                  userInCall: false
+                };
+                state.activeCalls.push(session);
+                var names = invited.map(function(id) { return getDreamName(id); });
+                addSystemMessage(g.id, '「' + initiator.name + '」发起了群聊通话\n通话成员有：' + [initiator.name].concat(names).join('、'));
+                // 2-5 分钟后自动结束
+                setTimeout(function() {
+                  var idx = state.activeCalls.indexOf(session);
+                  if (idx > -1) {
+                    state.activeCalls.splice(idx, 1);
+                    addSystemMessage(g.id, '通话已结束');
+                    saveState();
+                  }
+                }, 120000 + Math.random() * 180000);
+              }
+            }
+          }
+        }
+      }
             // 5% 概率有成员主动退群
 if (Math.random() < 0.05) {
   var candidates = g.memberIds.filter(function(id) {
@@ -1579,6 +1625,20 @@ function renderChatMessages() {
       html += '</div>';
     }
   }
+    // ===== 检查当前群聊是否有正在进行的通话，且用户不在里面 =====
+  var activeCallInGroup = null;
+  if (state.currentChatId && state.currentChatId.startsWith('group_') && state.activeCalls) {
+    activeCallInGroup = state.activeCalls.find(function(c) {
+      return c.chatId === state.currentChatId && c.participants.indexOf('user') === -1;
+    });
+  }
+  if (activeCallInGroup) {
+    var callerNames = activeCallInGroup.participants.map(function(id) { return getDreamName(id); }).join('、');
+    html = '<div style="text-align:center;margin:12px 0;font-size:12px;color:#86868b;">📞 ' + callerNames + ' 正在通话中</div>' +
+           '<div style="text-align:center;margin-bottom:12px;"><button onclick="joinActiveCall(\'' + activeCallInGroup.id + '\')" style="padding:6px 18px;border:none;border-radius:16px;background:var(--blue);color:#fff;font-size:13px;cursor:pointer;">点击加入通话</button></div>' + html;
+  }
+  // ========================================================
+  container.innerHTML = html;
   container.innerHTML = html;
   container.scrollTop = container.scrollHeight;
 }
@@ -3468,6 +3528,34 @@ window.currentCallType = '';
 window.aiAnswerTimer = null;
 window.dialTimeoutTimer = null;
 
+// ===== 通话系统（完整版） =====
+
+function getDreamName(id) {
+  if (id === 'user') return state.profile.name || '我';
+  var d = state.dreams.find(function(x) { return x.id === id; });
+  return d ? d.name : '未知';
+}
+
+function addSystemMessage(chatId, text) {
+  if (!chatId) return;
+  if (!state.chatSessions[chatId]) state.chatSessions[chatId] = [];
+  state.chatSessions[chatId].push({ from: 'system', text: text, time: Date.now() });
+  saveState();
+  if (state.currentChatId === chatId) {
+    loadChatMessages();
+    renderChatMessages();
+  }
+  renderChatList();
+}
+
+function isDreamBusy(dreamId) {
+  if (!state.activeCalls) return false;
+  for (var i = 0; i < state.activeCalls.length; i++) {
+    if (state.activeCalls[i].participants.indexOf(dreamId) > -1) return true;
+  }
+  return false;
+}
+
 function openCallPanel() {
   document.getElementById('actionMenuPanel').style.display = 'none';
   var isGroup = state.currentChatId && state.currentChatId.startsWith('group_');
@@ -3485,8 +3573,223 @@ function openCallPanel() {
     document.getElementById('callSelectMask').style.display = 'block';
     return;
   }
-  // 私聊：直接拨号给当前梦角
-  startUserDial([state.currentChatId]);
+  startUserDial([state.currentChatId], false);
+}
+
+function closeCallSelect() {
+  document.getElementById('callSelectPanel').style.display = 'none';
+  document.getElementById('callSelectMask').style.display = 'none';
+}
+
+function confirmCallSelect() {
+  var checked = document.querySelectorAll('#callSelectList input[type="checkbox"]:checked');
+  var ids = [];
+  checked.forEach(function(cb) { ids.push(cb.value); });
+  if (ids.length === 0) { showToast('请至少选一个'); return; }
+  closeCallSelect();
+  startUserDial(ids, true);
+}
+
+function startUserDial(targetIds, isGroup) {
+  if (state.callState !== 'idle') { showToast('正在通话中'); return; }
+  if (!targetIds || targetIds.length === 0) { showToast('未选择通话对象'); return; }
+  
+  // 检查忙线
+  var busy = targetIds.filter(function(id) { return isDreamBusy(id); });
+  if (busy.length > 0) {
+    var names = busy.map(getDreamName).join('、');
+    addSystemMessage(state.currentChatId, names + ' 正忙，请稍候再试');
+    showToast(names + ' 正忙');
+    return;
+  }
+
+  var session = {
+    id: 'call_' + Date.now(),
+    chatId: state.currentChatId,
+    type: isGroup ? 'group' : 'private',
+    initiator: 'user',
+    participants: ['user'],
+    invited: targetIds.slice(),
+    startTime: null,
+    status: 'dialing',
+    userInCall: true
+  };
+  state.activeCalls.push(session);
+  state.callSession = session;
+  state.callState = 'dialing';
+  renderCallUI();
+
+  targetIds.forEach(function(id) {
+    var roll = Math.random();
+    if (roll < 0.65) {
+      setTimeout(function() {
+        if (state.activeCalls.indexOf(session) === -1) return;
+        if (session.invited.indexOf(id) > -1) {
+          session.participants.push(id);
+          session.invited.splice(session.invited.indexOf(id), 1);
+          addSystemMessage(session.chatId, '「' + getDreamName(id) + '」加入了通话');
+          if (!session.startTime) {
+            session.startTime = Date.now();
+            session.status = 'connected';
+            state.callState = 'connected';
+            startCallTimer();
+          }
+          renderCallUI();
+        }
+      }, 1000 + Math.random() * 2000);
+    } else if (roll < 0.85) {
+      setTimeout(function() {
+        if (state.activeCalls.indexOf(session) === -1) return;
+        if (session.invited.indexOf(id) > -1) {
+          session.invited.splice(session.invited.indexOf(id), 1);
+          addSystemMessage(session.chatId, '「' + getDreamName(id) + '」拒绝了通话');
+          if (session.participants.length === 1 && session.invited.length === 0) {
+            endCallSession('对方已拒绝');
+          }
+        }
+      }, 1000 + Math.random() * 1500);
+    } else {
+      setTimeout(function() {
+        if (state.activeCalls.indexOf(session) === -1) return;
+        if (session.invited.indexOf(id) > -1) {
+          session.invited.splice(session.invited.indexOf(id), 1);
+          addSystemMessage(session.chatId, '「' + getDreamName(id) + '」无应答');
+          if (session.participants.length === 1 && session.invited.length === 0) {
+            endCallSession('对方无应答');
+          }
+        }
+      }, 15000);
+    }
+  });
+}
+
+function endCallSession(reason) {
+  if (!state.callSession) return;
+  var session = state.callSession;
+  var duration = 0;
+  if (session.startTime) duration = Math.floor((Date.now() - session.startTime) / 1000);
+  var idx = state.activeCalls.indexOf(session);
+  if (idx > -1) state.activeCalls.splice(idx, 1);
+  var msg = session.startTime ? '通话结束，时长 ' + formatDuration(duration).slice(3) : (reason || '通话已取消');
+  addSystemMessage(session.chatId, msg);
+  state.callSession = null;
+  state.callState = 'idle';
+  if (state.callTimerInterval) clearInterval(state.callTimerInterval);
+  state.callTimerInterval = null;
+  document.getElementById('callOverlay').classList.remove('active');
+  document.getElementById('callMini').classList.remove('show');
+  saveState();
+  renderCallUI();
+}
+
+function hangupCall() {
+  if (!state.callSession) return;
+  var session = state.callSession;
+  var idx = session.participants.indexOf('user');
+  if (idx > -1) session.participants.splice(idx, 1);
+  session.userInCall = false;
+  if (session.type === 'private' || session.participants.length <= 1) {
+    endCallSession('通话已结束');
+  } else {
+    addSystemMessage(session.chatId, '「' + (state.profile.name || '我') + '」退出了通话');
+    state.callSession = null;
+    state.callState = 'idle';
+    if (state.callTimerInterval) clearInterval(state.callTimerInterval);
+    state.callTimerInterval = null;
+    document.getElementById('callOverlay').classList.remove('active');
+    document.getElementById('callMini').classList.remove('show');
+    saveState();
+    renderCallUI();
+  }
+}
+
+function startCallTimer() {
+  if (state.callTimerInterval) clearInterval(state.callTimerInterval);
+  state.callTimerInterval = setInterval(function() {
+    if (!state.callSession || !state.callSession.startTime) return;
+    var elapsed = Math.floor((Date.now() - state.callSession.startTime) / 1000);
+    var el = document.getElementById('callTimer');
+    if (el) el.textContent = formatDuration(elapsed);
+    var mini = document.getElementById('miniTime');
+    if (mini) mini.textContent = formatDuration(elapsed).slice(0, 5);
+  }, 1000);
+}
+
+function renderCallUI() {
+  var overlay = document.getElementById('callOverlay');
+  var card = document.getElementById('callCard');
+  if (!overlay || !card) return;
+
+  if (!state.callSession) {
+    overlay.classList.remove('active');
+    return;
+  }
+
+  var session = state.callSession;
+  var participants = session.participants.filter(function(id) { return id !== 'user'; });
+  // 头像区
+  var avatarsHtml = '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">';
+  if (participants.length === 0 && session.invited.length > 0) {
+    // 正在拨打，显示邀请中的人
+    session.invited.forEach(function(id) {
+      var av = getDreamAvatar(id);
+      avatarsHtml += '<div style="text-align:center;"><img src="' + av + '" style="width:50px;height:50px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.3);"><div style="font-size:11px;color:#fff;margin-top:4px;">' + getDreamName(id) + '</div></div>';
+    });
+  } else {
+    participants.forEach(function(id) {
+      var av = getDreamAvatar(id);
+      avatarsHtml += '<div style="text-align:center;"><img src="' + av + '" style="width:50px;height:50px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.3);"><div style="font-size:11px;color:#fff;margin-top:4px;">' + getDreamName(id) + '</div></div>';
+    });
+  }
+  avatarsHtml += '</div>';
+
+  var existing = card.querySelector('.multi-avatars');
+  if (existing) existing.remove();
+  var div = document.createElement('div');
+  div.className = 'multi-avatars';
+  div.innerHTML = avatarsHtml;
+  var originalAvatar = card.querySelector('.call-avatar');
+  if (originalAvatar) originalAvatar.style.display = 'none';
+  card.insertBefore(div, card.firstChild);
+
+  var statusEl = document.getElementById('callStatus');
+  if (statusEl) {
+    if (session.status === 'dialing') statusEl.textContent = '正在呼叫…';
+    else if (session.status === 'connected') statusEl.textContent = '通话中';
+    else statusEl.textContent = '';
+  }
+
+  var timerEl = document.getElementById('callTimer');
+  if (timerEl) {
+    if (session.status === 'connected') timerEl.classList.add('show');
+    else timerEl.classList.remove('show');
+  }
+
+  var btns = document.getElementById('callButtons');
+  if (btns) {
+    if (session.status === 'dialing') {
+      btns.innerHTML = '<button class="call-btn hangup" onclick="cancelDial()">☎</button>';
+    } else {
+      btns.innerHTML = '<button class="call-btn minimize" onclick="minimizeCall()">−</button><button class="call-btn hangup" onclick="hangupCall()">☎</button>';
+    }
+  }
+
+  var bg = state.settings && state.settings.callBg;
+  if (bg) card.style.background = 'url(' + bg + ') center/cover, linear-gradient(145deg,#1a1a2e,#16213e)';
+  else card.style.background = 'linear-gradient(145deg,#1a1a2e,#16213e)';
+
+  overlay.classList.add('active');
+}
+
+function getDreamAvatar(id) {
+  var d = state.dreams.find(function(x) { return x.id === id; });
+  if (d && d.avatar) return d.avatar;
+  return 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2750%27 height=%2750%27 viewBox=%270 0 50 50%27%3E%3Ccircle cx=%2725%27 cy=%2725%27 r=%2725%27 fill=%27%23ffe0e8%27/%3E%3Ctext x=%2725%27 y=%2730%27 text-anchor=%27middle%27 fill=%27%23d6336c%27 font-size=%2720%27%3E💜%3C/text%3E%3C/svg%3E';
+}
+
+function cancelDial() {
+  if (!state.callSession || state.callSession.status !== 'dialing') return;
+  endCallSession('已取消');
 }
 
 function closeCallSelect() {
@@ -5545,3 +5848,25 @@ aiGroupOwnerAction = function(g) {
   // 如果没有触发禁言，就调用原有的逻辑（保证以前的功能不丢失）
   originalAiGroupOwnerAction(g);
 };
+
+function joinActiveCall(sessionId) {
+  if (!state.activeCalls) return;
+  var session = state.activeCalls.find(function(c) { return c.id === sessionId; });
+  if (!session) { showToast('该通话已结束'); renderChatMessages(); return; }
+  if (session.participants.indexOf('user') > -1) { showToast('你已经在这个通话里了'); return; }
+  if (state.callState !== 'idle') { showToast('你正在其他通话中，无法加入'); return; }
+
+  session.participants.push('user');
+  session.userInCall = true;
+  state.callSession = session;
+  state.callState = session.startTime ? 'connected' : 'dialing';
+
+  addSystemMessage(session.chatId, '「' + (state.profile.name || '我') + '」加入了通话');
+  saveState();
+
+  if (session.startTime) {
+    startCallTimer();
+    document.getElementById('callOverlay').classList.add('active');
+  }
+  renderCallUI();
+}
