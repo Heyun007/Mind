@@ -1173,8 +1173,8 @@ async function sendNotification(title, body) {
   try {
     const reg = await navigator.serviceWorker.ready;
     reg.showNotification(title, {
-      body: body,
-      icon: state.dream.avatar || '',
+  body: body,
+  icon: '',
       tag: 'dream-' + Date.now(),
       requireInteraction: true,
       vibrate: [200,100,200]
@@ -1363,8 +1363,17 @@ if (Math.random() < 0.05) {
   }
 
   renderChatMessages();
-  saveChatMessages();
-  sendNotification(state.dream.name || '梦角', '发来一条消息');
+saveChatMessages();
+// 【修复】：找到真正的发件人名字
+var notifyName = '梦角';
+if (isGroup && senderId) {
+  var notifyMember = state.dreams.find(function(d) { return d.id === senderId; });
+  if (notifyMember) notifyName = notifyMember.name;
+} else if (state.currentChatId) {
+  var notifyDream = state.dreams.find(function(d) { return d.id === state.currentChatId; });
+  if (notifyDream) notifyName = notifyDream.name;
+}
+sendNotification(notifyName, '发来一条消息');
 }
 
 // ===== AI 群主的管理行为 =====
