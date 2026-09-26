@@ -1348,9 +1348,9 @@ if (Math.random() < 0.05) {
       return; 
     }
   }
-    // 【新增】：群聊或私聊，AI有20%概率发拍一拍
+    // 【新增】：群聊或私聊，AI有5%概率发拍一拍
   var usePoke = false;
-  if (state.pokes && state.pokes.length > 0 && Math.random() < 0.2) {
+  if (state.pokes && state.pokes.length > 0 && Math.random() < 0.05) {
     usePoke = true;
   }
   
@@ -1393,10 +1393,10 @@ if (usePoke) {
   chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: '…', time: Date.now() });
 }
 
-// ===== 梦角随机撤回自己发的消息（10% 概率）=====
+// ===== 梦角随机撤回自己发的消息（3% 概率）=====
 var _lastMsg = chatMessages[chatMessages.length - 1];
 var _chatIdAtSend = state.currentChatId;
-if (_lastMsg && _lastMsg.from === 'dream' && Math.random() < 0.1) {
+if (_lastMsg && _lastMsg.from === 'dream' && Math.random() < 0.03) {
   var _withdrawSenderName = '';
   if (isGroup && _lastMsg.senderId) {
     _withdrawSenderName = getDreamName(_lastMsg.senderId);
