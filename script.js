@@ -1247,7 +1247,7 @@ function dreamReply() {
     if (g) {
       checkExpiredMutes(g);
             // AI 主动发起群聊通话（概率 5%）
-      if (Math.random() < 0.05 && state.activeCalls.length < 3) {
+      if (Math.random() < 0.25 && state.activeCalls.length < 3) {
         var initiatorId = g.memberIds[Math.floor(Math.random() * g.memberIds.length)];
         if (initiatorId && String(initiatorId) !== 'user') {
           var initiator = state.dreams.find(function(d) { return d.id === initiatorId; });
