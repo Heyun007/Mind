@@ -3788,7 +3788,6 @@ function renderCallUI() {
 
   if (!state.callSession) {
     overlay.classList.remove('active');
-    // 关闭时也清干净残留头像
     var olds0 = card.querySelectorAll('.multi-avatars');
     for (var i0 = 0; i0 < olds0.length; i0++) olds0[i0].remove();
     var oa0 = card.querySelector('.call-avatar');
@@ -3797,15 +3796,15 @@ function renderCallUI() {
   }
 
   var session = state.callSession;
-  var participants = session.participants.filter(function(id) { return id !== 'user'; });
+  // 【修复1】过滤掉空 id，防止幽灵成员“沈屿”出现
+  var participants = session.participants.filter(function(id) { return id && id !== 'user'; });
 
-  // 【核心修复】：彻底清空所有旧头像区（而不是只删第一个）
   var olds = card.querySelectorAll('.multi-avatars');
   for (var i = 0; i < olds.length; i++) olds[i].remove();
 
-  // 头像区
   var avatarsHtml = '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">';
   var showList = participants.length > 0 ? participants : (session.invited || []);
+  showList = showList.filter(function(id){ return id && id !== 'user'; });
   showList.forEach(function(id) {
     var av = getDreamAvatar(id);
     avatarsHtml += '<div style="text-align:center;"><img src="' + av + '" style="width:50px;height:50px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.3);"><div style="font-size:11px;color:#fff;margin-top:4px;">' + getDreamName(id) + '</div></div>';
@@ -3819,7 +3818,6 @@ function renderCallUI() {
   if (originalAvatar) originalAvatar.style.display = 'none';
   card.insertBefore(div, card.firstChild);
 
-  // 状态文字
   var statusEl = document.getElementById('callStatus');
   if (statusEl) {
     if (session.status === 'dialing') statusEl.textContent = '正在呼叫…';
@@ -3828,14 +3826,12 @@ function renderCallUI() {
     else statusEl.textContent = '';
   }
 
-  // 计时器
   var timerEl = document.getElementById('callTimer');
   if (timerEl) {
     if (session.status === 'connected') timerEl.classList.add('show');
     else timerEl.classList.remove('show');
   }
 
-  // 按钮
   var btns = document.getElementById('callButtons');
   if (btns) {
     if (session.status === 'dialing') {
@@ -5951,16 +5947,26 @@ function startAICallSimulation(session, group) {
   }
 
   function tick() {
-    // 通话已被外部结束，停止模拟
     if (state.activeCalls.indexOf(session) === -1) return;
-
     var aiParts = getAIParticipants();
-    // 参与人数少于 2（含用户判断），结束通话
-    if (session.participants.length < 2) { endAICall(session, group); return; }
 
-    // 超过 10 分钟强制结束
-    var elapsed = (Date.now() - session.startTime) / 1000;
-    if (elapsed > 600) { endAICall(session, group); return; }
+    // 【修复2】如果 AI 都退出了，只剩下用户，自动帮用户挂断
+    if (aiParts.length === 0 && session.participants.indexOf('user') > -1) {
+      addSystemMessage(group.id, '其他成员已全部退出，通话结束');
+      if (state.callSession && state.callSession.id === session.id) {
+        state.callSession = null;
+        state.callState = 'idle';
+        document.getElementById('callOverlay').classList.remove('active');
+        if (state.callTimerInterval) { clearInterval(state.callTimerInterval); state.callTimerInterval = null; }
+        renderCallUI();
+      }
+      endAICall(session, group);
+      return;
+    }
+
+    if (session.participants.length < 2 && session.participants.indexOf('user') === -1) {
+      endAICall(session, group); return;
+    }
 
     var roll = Math.random();
 
@@ -5970,6 +5976,11 @@ function startAICallSimulation(session, group) {
       var li = session.participants.indexOf(leaver);
       if (li > -1) session.participants.splice(li, 1);
       addSystemMessage(group.id, '「' + getDreamName(leaver) + '」退出了通话');
+      
+      // 【修复3】AI 退出时，如果用户在看通话界面，立刻刷新让头像消失
+      if (state.callSession && state.callSession.id === session.id) {
+        renderCallUI();
+      }
     }
     // 25% 一个不在通话里的 AI 加入
     else if (roll < 0.55) {
@@ -5980,9 +5991,12 @@ function startAICallSimulation(session, group) {
         var joiner = notInCall[Math.floor(Math.random() * notInCall.length)];
         session.participants.push(joiner);
         addSystemMessage(group.id, '「' + getDreamName(joiner) + '」加入了通话');
+        if (state.callSession && state.callSession.id === session.id) {
+          renderCallUI();
+        }
       }
     }
-    // 15% AI 邀请用户加入（前提是用户不在通话里，且还没邀请过）
+    // 15% AI 邀请用户加入
     else if (roll < 0.70) {
       if (session.participants.indexOf('user') === -1 && aiParts.length > 0 && !session.userInvited) {
         var inviter = aiParts[Math.floor(Math.random() * aiParts.length)];
@@ -5991,7 +6005,6 @@ function startAICallSimulation(session, group) {
           if (!session.invited) session.invited = [];
           if (session.invited.indexOf('user') === -1) session.invited.push('user');
           addSystemMessage(group.id, '「' + getDreamName(inviter) + '」邀请你加入通话');
-          // 用 setTimeout 让渲染先跑完，再弹确认框
           setTimeout(function() {
             var userConfirmed = confirm('「' + getDreamName(inviter) + '」邀请你加入通话，是否加入？');
             if (userConfirmed) {
@@ -6006,14 +6019,11 @@ function startAICallSimulation(session, group) {
         }
       }
     }
-    // 剩下的 30%：什么都不做
 
     saveState();
-    // 下一次行动延迟 8-18 秒
     setTimeout(tick, 8000 + Math.random() * 10000);
   }
 
-  // 第一次行动延迟 8-15 秒
   setTimeout(tick, 8000 + Math.random() * 7000);
 }
 
