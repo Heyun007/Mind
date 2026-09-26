@@ -879,7 +879,7 @@ function startRandomEvents() {
 
 function triggerRandomEvent() {
   var r = Math.random();
-  if (r < 0.2) {
+  if (r < 0.05) {
   if (state.callState === 'idle') triggerCall();
 } else if (r < 0.275) {
   if (state.callState === 'idle') triggerCheckin();
