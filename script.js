@@ -1469,17 +1469,15 @@ function renderChat() {
   }
 
   // ===== 更新通话横条（只有被邀请才显示） =====
+  // ===== 更新通话横条（只要有人在通话就显示横幅，但按钮只对被邀请者显示） =====
   var banner = document.getElementById('activeCallBanner');
   if (banner) {
     var bannerCall = null;
     if (state.currentChatId && state.currentChatId.startsWith('group_') && state.activeCalls) {
       for (var bi = 0; bi < state.activeCalls.length; bi++) {
         var c = state.activeCalls[bi];
-        if (c.chatId === state.currentChatId &&
-            c.participants.indexOf('user') === -1 &&
-            c.invited && c.invited.indexOf('user') > -1) {
-          bannerCall = c;
-          break;
+        if (c.chatId === state.currentChatId && c.participants.indexOf('user') === -1) {
+          bannerCall = c; break;
         }
       }
     }
@@ -1487,6 +1485,15 @@ function renderChat() {
       var names = bannerCall.participants.map(function(id) { return getDreamName(id); }).join('、');
       document.getElementById('activeCallBannerText').textContent = '📞 ' + names + ' 正在通话中';
       banner.style.display = 'flex';
+      // 只有被邀请时，才显示「加入」按钮
+      var joinBtn = document.getElementById('activeCallJoinBtn');
+      if (joinBtn) {
+        if (bannerCall.invited && bannerCall.invited.indexOf('user') > -1) {
+          joinBtn.style.display = 'inline-block';
+        } else {
+          joinBtn.style.display = 'none';
+        }
+      }
     } else {
       banner.style.display = 'none';
     }
