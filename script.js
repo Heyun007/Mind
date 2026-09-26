@@ -4491,6 +4491,13 @@ function triggerAiComment(diaryId, replyToAuthorId) {
   if (candidates.length === 0) return;
   var dream = candidates[Math.floor(Math.random() * candidates.length)];
 
+  // 【核心修复】：限制每个梦角在这篇日记下的总评论数（含回复）最多 3 条
+if (!diary.comments) diary.comments = [];
+var myTotalComments = diary.comments.filter(function(c) {
+  return c.authorId === dream.id;
+}).length;
+if (myTotalComments >= 3) return;
+  
   // 主动评论次数上限 2 次
   if (!diary.comments) diary.comments = [];
   var myActiveCount = diary.comments.filter(function(c) {
