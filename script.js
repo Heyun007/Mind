@@ -880,10 +880,10 @@ function startRandomEvents() {
 function triggerRandomEvent() {
   var r = Math.random();
   if (r < 0.2) {
-    if (state.callState === 'idle') triggerCall();
-  } else if (r < 0.6) {
-    if (state.callState === 'idle') triggerCheckin();
-  } else {
+  if (state.callState === 'idle') triggerCall();
+} else if (r < 0.275) {
+  if (state.callState === 'idle') triggerCheckin();
+} else {
     var allCards = state.cards || [];
     if (allCards.length > 0 && state.dreams && state.dreams.length > 0) {
       var card = allCards[Math.floor(Math.random() * allCards.length)];
