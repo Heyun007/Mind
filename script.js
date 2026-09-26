@@ -5500,3 +5500,32 @@ function resetAnniBg() {
 
 // 遮罩点击关闭
 document.getElementById('anniMask').addEventListener('click', closeAnniPanel);
+
+// ===== 覆盖 AI 群主行为：只增加禁言用户，不踢人 =====
+var originalAiGroupOwnerAction = aiGroupOwnerAction;
+aiGroupOwnerAction = function(g) {
+  var owner = state.dreams.find(function(d) { return d.id === g.ownerId; });
+  if (!owner) return;
+
+  // 新增：AI群主有 20% 的概率禁言用户
+  if (g.ownerId !== 'user' && Math.random() < 0.2) {
+    if (!g.muteEndsAt) g.muteEndsAt = {};
+    if (g.muteEndsAt['user'] === undefined) {
+      var mins = [5, 10, 15][Math.floor(Math.random() * 3)];
+      g.muteEndsAt['user'] = Date.now() + mins * 60000;
+      var sysText = '群主「' + owner.name + '」禁言了你 ' + mins + ' 分钟';
+      if (!state.chatSessions[g.id]) state.chatSessions[g.id] = [];
+      state.chatSessions[g.id].push({ from: 'system', text: sysText, time: Date.now() });
+      saveState();
+      if (state.currentChatId === g.id) {
+        loadChatMessages();
+        renderChatMessages();
+      }
+      showToast(sysText);
+      return; // 禁言完成后直接返回，不执行后面的踢人/转让逻辑
+    }
+  }
+
+  // 如果没有触发禁言，就调用原有的逻辑（保证以前的功能不丢失）
+  originalAiGroupOwnerAction(g);
+};
