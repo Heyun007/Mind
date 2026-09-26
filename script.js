@@ -1246,8 +1246,8 @@ function dreamReply() {
     var g = state.groups.find(function(item) { return item.id === state.currentChatId; });
     if (g) {
       checkExpiredMutes(g);
-                  // AI 主动发起群聊通话（25% 概率）
-      if (Math.random() < 0.25 && state.activeCalls.length < 3) {
+                  // AI 主动发起群聊通话（10% 概率）
+      if (Math.random() < 0.10 && state.activeCalls.length < 3) {
         // 发起人必须不在任何通话中
         var idleCandidates = g.memberIds.filter(function(id) {
           return String(id) !== 'user' && !isDreamBusy(id);
