@@ -1355,29 +1355,56 @@ if (Math.random() < 0.05) {
   }
   
   
-  var hasCards = cards.length > 0;
-  var hasStickers = stickers.length > 0;
-  if (hasCards && hasStickers) {
-    if (Math.random() < 0.85) useCard = true; else useSticker = true;
-  } else if (hasCards) useCard = true;
-  else if (hasStickers) useSticker = true;
-
-  if (useCard) {
-    var idx = Math.floor(Math.random() * cards.length);
-    chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: cards[idx].text || '…', time: Date.now() });
-  } else if (useSticker) {
-    var lastMsg = chatMessages[chatMessages.length - 1];
-    if (lastMsg === undefined || lastMsg === null) lastMsg = { from: 'system' };
-    if (stickers.length > 1 && lastMsg.from === 'user' && lastMsg.stickerIdx !== undefined) {
-      do { stickerIdx = Math.floor(Math.random() * stickers.length); } while (stickerIdx === lastMsg.stickerIdx);
-    } else {
-      stickerIdx = Math.floor(Math.random() * stickers.length);
-    }
-    chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: '[表情]', stickerIdx: stickerIdx, stickerData: stickers[stickerIdx], time: Date.now() });
+  // 【核心修复】：优先处理拍一拍
+if (usePoke) {
+  var pokeText = state.pokes[Math.floor(Math.random() * state.pokes.length)];
+  var pokeSenderName = senderId ? getDreamName(senderId) : (state.dream.name || '梦角');
+  chatMessages.push({
+    from: 'dream',
+    type: 'poke',
+    text: pokeText,
+    senderName: pokeSenderName,
+    senderId: senderId,
+    time: Date.now()
+  });
+} else if (useCard) {
+  var idx = Math.floor(Math.random() * cards.length);
+  chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: cards[idx].text || '…', time: Date.now() });
+} else if (useSticker) {
+  var lastMsg = chatMessages[chatMessages.length - 1];
+  if (lastMsg === undefined || lastMsg === null) lastMsg = { from: 'system' };
+  if (stickers.length > 1 && lastMsg.from === 'user' && lastMsg.stickerIdx !== undefined) {
+    do { stickerIdx = Math.floor(Math.random() * stickers.length); } while (stickerIdx === lastMsg.stickerIdx);
   } else {
-    chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: '…', time: Date.now() });
+    stickerIdx = Math.floor(Math.random() * stickers.length);
   }
+  chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: '[表情]', stickerIdx: stickerIdx, stickerData: stickers[stickerIdx], time: Date.now() });
+} else {
+  chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: '…', time: Date.now() });
+}
 
+// ===== 梦角随机撤回自己发的消息（10% 概率）=====
+var _lastMsg = chatMessages[chatMessages.length - 1];
+var _chatIdAtSend = state.currentChatId;
+if (_lastMsg && _lastMsg.from === 'dream' && Math.random() < 0.1) {
+  var _withdrawSenderName = '';
+  if (isGroup && _lastMsg.senderId) {
+    _withdrawSenderName = getDreamName(_lastMsg.senderId);
+  } else {
+    var _wd = state.dreams.find(function(d){ return d.id === _chatIdAtSend; });
+    _withdrawSenderName = _wd ? _wd.name : '梦角';
+  }
+  setTimeout(function() {
+    if (state.currentChatId !== _chatIdAtSend) return;
+    var _idx = chatMessages.indexOf(_lastMsg);
+    if (_idx > -1 && chatMessages[_idx] === _lastMsg) {
+      chatMessages[_idx] = { from: 'system', text: '「' + _withdrawSenderName + '」撤回了一条消息', time: Date.now() };
+      saveChatMessages();
+      renderChatMessages();
+    }
+  }, 3000 + Math.random() * 4000);
+}
+  
   renderChatMessages();
 saveChatMessages();
 // 【修复】：找到真正的发件人名字
