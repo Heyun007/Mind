@@ -896,12 +896,20 @@ function triggerRandomEvent() {
       if (chatPage && chatPage.classList.contains('active') && state.currentChatId) {
          // 如果是群聊，找群里的随机人发
          if (state.currentChatId.startsWith('group_')) {
-           var g = state.groups.find(function(item) { return item.id === state.currentChatId; });
-           if (g && g.memberIds.length > 0) {
-             var randomId = g.memberIds[Math.floor(Math.random() * g.memberIds.length)];
-             var member = state.dreams.find(function(d) { return d.id === randomId; });
-             if (member) randomDream = member;
-           }
+  var g = state.groups.find(function(item) { return item.id === state.currentChatId; });
+  if (g && g.memberIds.length > 0) {
+    // 【修复】过滤掉被禁言的成员
+    var availableIds = g.memberIds.filter(function(id) {
+      return !g.muteEndsAt || g.muteEndsAt[String(id)] === undefined;
+    });
+    if (availableIds.length > 0) {
+      var randomId = availableIds[Math.floor(Math.random() * availableIds.length)];
+      var member = state.dreams.find(function(d) { return d.id === randomId; });
+      if (member) randomDream = member;
+    } else {
+      return;
+    }
+  }
          }
          chatMessages.push({ from: 'dream', senderId: randomDream.id, senderAvatar: randomDream.avatar, text: card.text, time: Date.now() });
          saveChatMessages();
