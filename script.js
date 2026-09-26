@@ -3558,7 +3558,9 @@ function openCallPanel() {
   if (isGroup) {
     var g = state.groups.find(function(item) { return item.id === state.currentChatId; });
     if (!g || g.memberIds.length === 0) { showToast('群成员为空'); return; }
-    var list = document.getElementById('callSelectList');
+        var list = document.getElementById('callSelectList');
+    // 【核心修复】：每次打开选择面板，先清空所有勾选
+    list.innerHTML = '';
     list.innerHTML = g.memberIds.map(function(id) {
       var m = state.dreams.find(function(d) { return d.id === id; });
       if (!m) return '';
