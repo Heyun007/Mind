@@ -1277,15 +1277,7 @@ function dreamReply() {
                 state.activeCalls.push(session);
                 var names = invited.map(function(id) { return getDreamName(id); });
                 addSystemMessage(g.id, '「' + initiator.name + '」发起了群聊通话\n通话成员有：' + [initiator.name].concat(names).join('、'));
-                // 2-5 分钟后自动结束
-                setTimeout(function() {
-                  var idx = state.activeCalls.indexOf(session);
-                  if (idx > -1) {
-                    state.activeCalls.splice(idx, 1);
-                    addSystemMessage(g.id, '通话已结束');
-                    saveState();
-                  }
-                }, 120000 + Math.random() * 180000);
+                startAICallSimulation(session, g);
               }
             }
           }
@@ -5868,4 +5860,73 @@ function joinActiveCall(sessionId) {
     document.getElementById('callOverlay').classList.add('active');
   }
   renderCallUI();
+}
+
+// ===== AI 通话模拟：AI 之间互相加入/退出，偶尔邀请用户 =====
+function startAICallSimulation(session, group) {
+  function getAIParticipants() {
+    return session.participants.filter(function(id) { return String(id) !== 'user'; });
+  }
+
+  function tick() {
+    // 通话已被外部结束，停止模拟
+    if (state.activeCalls.indexOf(session) === -1) return;
+
+    var aiParts = getAIParticipants();
+    // 参与人数少于 2（含用户判断），结束通话
+    if (session.participants.length < 2) { endAICall(session, group); return; }
+
+    // 超过 10 分钟强制结束
+    var elapsed = (Date.now() - session.startTime) / 1000;
+    if (elapsed > 600) { endAICall(session, group); return; }
+
+    var roll = Math.random();
+
+    // 30% 一个 AI 退出
+    if (roll < 0.30 && aiParts.length > 0) {
+      var leaver = aiParts[Math.floor(Math.random() * aiParts.length)];
+      var li = session.participants.indexOf(leaver);
+      if (li > -1) session.participants.splice(li, 1);
+      addSystemMessage(group.id, '「' + getDreamName(leaver) + '」退出了通话');
+    }
+    // 25% 一个不在通话里的 AI 加入
+    else if (roll < 0.55) {
+      var notInCall = group.memberIds.filter(function(id) {
+        return String(id) !== 'user' && session.participants.indexOf(id) === -1;
+      });
+      if (notInCall.length > 0) {
+        var joiner = notInCall[Math.floor(Math.random() * notInCall.length)];
+        session.participants.push(joiner);
+        addSystemMessage(group.id, '「' + getDreamName(joiner) + '」加入了通话');
+      }
+    }
+    // 15% AI 邀请用户加入（前提是用户不在通话里）
+    else if (roll < 0.70) {
+      if (session.participants.indexOf('user') === -1 && aiParts.length > 0) {
+        var inviter = aiParts[Math.floor(Math.random() * aiParts.length)];
+        // 检查用户当前是否正忙
+        if (state.callState === 'idle') {
+          addSystemMessage(group.id, '「' + getDreamName(inviter) + '」邀请你加入通话');
+        }
+      }
+    }
+    // 剩下的 30%：什么都不做
+
+    saveState();
+    // 下一次行动延迟 8-18 秒
+    setTimeout(tick, 8000 + Math.random() * 10000);
+  }
+
+  // 第一次行动延迟 8-15 秒
+  setTimeout(tick, 8000 + Math.random() * 7000);
+}
+
+function endAICall(session, group) {
+  var idx = state.activeCalls.indexOf(session);
+  if (idx === -1) return;
+  state.activeCalls.splice(idx, 1);
+  var dur = 0;
+  if (session.startTime) dur = Math.floor((Date.now() - session.startTime) / 1000);
+  addSystemMessage(group.id, '通话结束，时长 ' + formatDuration(dur).slice(3));
+  saveState();
 }
