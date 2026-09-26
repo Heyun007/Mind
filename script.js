@@ -2902,9 +2902,9 @@ function scheduleAiReply() {
     if (hasUnread) { saveChatMessages(); renderChatMessages(); }
   }, 1500 + Math.random() * 2500);
 
-  // 【已读不回】：开启后，30% 概率不回
+  // 【已读不回】：开启后，10% 概率不回
   if (state.settings && state.settings.readNoReply) {
-    if (Math.random() < 0.3) {
+    if (Math.random() < 0.1) {
       // 只已读，不回
       return;
     }
@@ -3677,13 +3677,12 @@ function checkAutoMessage() {
   var candidates = [];
   state.dreams.forEach(function(d) {
     var lastAt = state.lastActivityAt[d.id] || 0;
-    if (lastAt === 0) return; // 从没聊过，不主动
     if (now - lastAt >= threshold) candidates.push(d);
   });
   if (candidates.length === 0) return;
 
-  // 50% 概率真的发，避免太机械
-  if (Math.random() > 0.5) return;
+  // 10% 概率真的发，避免太机械
+  if (Math.random() > 0.1) return;
 
   var picked = candidates[Math.floor(Math.random() * candidates.length)];
   var card = (state.cards && state.cards.length > 0)
