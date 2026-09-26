@@ -128,8 +128,22 @@ body{background:var(--bg);display:flex;justify-content:center;align-items:center
 .call-buttons{display:flex;justify-content:center;gap:40px;}
 .call-btn{width:56px;height:56px;border-radius:50%;border:none;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform 0.15s;}
 .call-btn:active{transform:scale(0.9);}
-.call-btn.hangup{background:var(--red);color:#fff;}
-.call-btn.answer{background:var(--green);color:#fff;}
+.call-btn.hangup{
+  background: rgba(255,59,48,0.72);
+  color: #fff;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.35);
+  box-shadow: 0 4px 14px rgba(255,59,48,0.25);
+}
+.call-btn.answer{
+  background: rgba(52,199,89,0.72);
+  color: #fff;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.35);
+  box-shadow: 0 4px 14px rgba(52,199,89,0.25);
+}
 .call-btn.minimize{background:rgba(255,255,255,0.15);color:#fff;font-size:16px;margin-left:auto;}
 .call-mini{display:none;position:absolute;bottom:20px;right:20px;z-index:70;background:rgba(0,0,0,0.8);backdrop-filter:blur(10px);border-radius:24px;padding:6px 12px 6px 6px;align-items:center;gap:8px;cursor:pointer;animation:fadeIn 0.2s;box-shadow:0 4px 20px rgba(0,0,0,0.3);}
 .call-mini.show{display:flex;}
