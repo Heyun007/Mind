@@ -766,6 +766,19 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+  <!-- 首次进入欢迎面板 -->
+<div id="welcomeOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.45); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:9999; justify-content:center; align-items:center; padding:20px;">
+  <div style="background:#fff; border-radius:22px; padding:32px 26px; max-width:320px; width:100%; box-shadow:0 20px 60px rgba(0,0,0,0.3); text-align:center; animation:popIn 0.3s ease-out;">
+    <div style="font-size:18px; font-weight:700; color:#1d1d1f; margin-bottom:22px; letter-spacing:1px;">感谢使用 Mind</div>
+    <div style="font-size:14px; color:#555; line-height:2; margin-bottom:26px;">
+      <div>原创：小红书@云七命27723043661</div>
+      <div style="font-weight:600; color:#d6336c;">禁二改</div>
+      <div style="margin-top:8px;">祝屏幕前的大家和梦角久久</div>
+    </div>
+    <button onclick="closeWelcome()" style="width:100%; padding:12px; border:none; border-radius:14px; background:#007aff; color:#fff; font-size:15px; font-weight:600; cursor:pointer;">确认</button>
+  </div>
+</div>
+
 </div>
 
 <script src="script.js"></script>
