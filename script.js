@@ -1031,41 +1031,6 @@ function answerCall() {
   saveState();
 }
 
-function hangupCall() {
-  if (state.callState === 'idle') return;
-  if (state.callTimerInterval) clearInterval(state.callTimerInterval);
-  state.callTimerInterval = null;
-
-  var sysText = '';
-  if (state.callState === 'ringing') {
-    state.callHistory.push({ id: state.nextCallId++, type: 'hung', timestamp: Date.now(), duration: 0 });
-    sysText = '已挂断';
-  } else if (state.callState === 'connected') {
-    var dur = Math.floor((Date.now() - state.callStartTime) / 1000);
-    for (var i = state.callHistory.length - 1; i >= 0; i--) {
-      if (state.callHistory[i].type === 'answered' && state.callHistory[i].duration === 0) {
-        state.callHistory[i].duration = dur; break;
-      }
-    }
-    sysText = '通话时长 ' + formatDuration(dur).slice(3);
-  } else if (state.callState === 'dialing' || state.callState === 'minimized') {
-    sysText = '已挂断';
-  }
-
-  if (sysText && state.currentChatId) {
-    if (!state.chatSessions[state.currentChatId]) state.chatSessions[state.currentChatId] = [];
-    state.chatSessions[state.currentChatId].push({ from: 'system', text: sysText, time: Date.now() });
-    saveState();
-    loadChatMessages();
-    renderChatMessages();
-  }
-
-  state.callState = 'idle';
-  document.getElementById('callOverlay').classList.remove('active');
-  document.getElementById('callMini').classList.remove('show');
-  saveState();
-}
-
 function minimizeCall() {
   if (state.callState !== 'connected') return;
   state.callState = 'minimized';
