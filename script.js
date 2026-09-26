@@ -3648,61 +3648,58 @@ function endCallSession(reason) {
 }
 
 function hangupCall() {
-  // 第一件事：无论发生什么，先把界面关掉，防止卡死
-  document.getElementById('callOverlay').classList.remove('active');
-  document.getElementById('callMini').classList.remove('show');
+  // ===== 第一步：无论如何，先强制关闭界面，防止用户卡死 =====
+  try {
+    var ov = document.getElementById('callOverlay');
+    if (ov) ov.classList.remove('active');
+    var mini = document.getElementById('callMini');
+    if (mini) mini.classList.remove('show');
+  } catch(e) {}
   if (state.callTimerInterval) { clearInterval(state.callTimerInterval); state.callTimerInterval = null; }
 
-  // ===== 情况一：新体系（用户主动拨号 / 群聊通话） =====
+  // ===== 第二步：确定要写消息的聊天窗口，和通话开始时间 =====
+  var chatId = null;
+  var startTime = null;
+
   if (state.callSession) {
-    var session = state.callSession;
-    var idx = session.participants.indexOf('user');
-    if (idx > -1) session.participants.splice(idx, 1);
-    session.userInCall = false;
-    var activeIdx = state.activeCalls.indexOf(session);
-    if (activeIdx > -1) state.activeCalls.splice(activeIdx, 1);
-
-    try {
-      if (session.startTime) {
-        var duration = Math.floor((Date.now() - session.startTime) / 1000);
-        addSystemMessage(session.chatId, '通话结束，时长 ' + formatDuration(duration).slice(3));
-      } else {
-        addSystemMessage(session.chatId, '通话已取消');
-      }
-    } catch(e) { console.error(e); }
-
-    state.callSession = null;
-    state.callState = 'idle';
-    saveState();
-    return;
-  }
-
-  // ===== 情况二：旧体系（AI 打来的电话，还没接入新 session） =====
-  if (state.callState === 'idle') return;
-  var sysText = '';
-  if (state.callState === 'ringing') {
-    state.callHistory.push({ id: state.nextCallId++, type: 'hung', timestamp: Date.now(), duration: 0 });
-    sysText = '已挂断';
-  } else if (state.callState === 'connected') {
-    var dur2 = Math.floor((Date.now() - state.callStartTime) / 1000);
-    for (var i = state.callHistory.length - 1; i >= 0; i--) {
-      if (state.callHistory[i].type === 'answered' && state.callHistory[i].duration === 0) {
-        state.callHistory[i].duration = dur2; break;
-      }
+    chatId = state.callSession.chatId;
+    startTime = state.callSession.startTime;
+    // 从 activeCalls 里移除（防御式，检查字段是否存在）
+    if (state.activeCalls && Array.isArray(state.activeCalls)) {
+      var i = state.activeCalls.indexOf(state.callSession);
+      if (i > -1) state.activeCalls.splice(i, 1);
     }
-    sysText = '通话时长 ' + formatDuration(dur2).slice(3);
-  } else if (state.callState === 'dialing' || state.callState === 'minimized') {
-    sysText = '已挂断';
+    state.callSession = null;
+  } else if (state.currentChatId) {
+    chatId = state.currentChatId;
+    startTime = state.callStartTime;
   }
 
-  if (sysText && state.currentChatId) {
-    if (!state.chatSessions[state.currentChatId]) state.chatSessions[state.currentChatId] = [];
-    state.chatSessions[state.currentChatId].push({ from: 'system', text: sysText, time: Date.now() });
+  // ===== 第三步：往聊天界面写入系统小字 =====
+  var msg = '';
+  if (startTime) {
+    var dur = Math.floor((Date.now() - startTime) / 1000);
+    msg = '通话结束，时长 ' + formatDuration(dur).slice(3);
+  } else {
+    msg = '已挂断';
   }
+
+  if (chatId) {
+    if (!state.chatSessions[chatId]) state.chatSessions[chatId] = [];
+    state.chatSessions[chatId].push({ from: 'system', text: msg, time: Date.now() });
+    if (state.currentChatId === chatId) {
+      try { loadChatMessages(); renderChatMessages(); } catch(e) {}
+    }
+  }
+
+  // ===== 第四步：清空状态 =====
   state.callState = 'idle';
-  saveState();
-  loadChatMessages();
-  renderChatMessages();
+  state.callStartTime = null;
+  state.callElapsed = 0;
+  try { saveState(); } catch(e) {}
+
+  // ===== 调试信息：按 F12 能在控制台看到，方便定位问题 =====
+  console.log('[hangupCall] 已执行，chatId =', chatId, '，msg =', msg);
 }
 
 function startCallTimer() {
