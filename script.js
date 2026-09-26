@@ -3679,6 +3679,17 @@ function endCallSession(reason) {
 }
 
 function hangupCall() {
+    // 清理通话界面残留的多人头像
+  try {
+    var cardEl = document.getElementById('callCard');
+    if (cardEl) {
+      var olds = cardEl.querySelectorAll('.multi-avatars');
+      for (var i = 0; i < olds.length; i++) olds[i].remove();
+      var oa = cardEl.querySelector('.call-avatar');
+      if (oa) oa.style.display = '';
+    }
+  } catch(e) {}
+  
   // ===== 第一步：无论如何，先强制关闭界面，防止用户卡死 =====
   try {
     var ov = document.getElementById('callOverlay');
@@ -3752,29 +3763,30 @@ function renderCallUI() {
 
   if (!state.callSession) {
     overlay.classList.remove('active');
+    // 关闭时也清干净残留头像
+    var olds0 = card.querySelectorAll('.multi-avatars');
+    for (var i0 = 0; i0 < olds0.length; i0++) olds0[i0].remove();
+    var oa0 = card.querySelector('.call-avatar');
+    if (oa0) oa0.style.display = '';
     return;
   }
 
   var session = state.callSession;
   var participants = session.participants.filter(function(id) { return id !== 'user'; });
+
+  // 【核心修复】：彻底清空所有旧头像区（而不是只删第一个）
+  var olds = card.querySelectorAll('.multi-avatars');
+  for (var i = 0; i < olds.length; i++) olds[i].remove();
+
   // 头像区
   var avatarsHtml = '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">';
-  if (participants.length === 0 && session.invited.length > 0) {
-    // 正在拨打，显示邀请中的人
-    session.invited.forEach(function(id) {
-      var av = getDreamAvatar(id);
-      avatarsHtml += '<div style="text-align:center;"><img src="' + av + '" style="width:50px;height:50px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.3);"><div style="font-size:11px;color:#fff;margin-top:4px;">' + getDreamName(id) + '</div></div>';
-    });
-  } else {
-    participants.forEach(function(id) {
-      var av = getDreamAvatar(id);
-      avatarsHtml += '<div style="text-align:center;"><img src="' + av + '" style="width:50px;height:50px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.3);"><div style="font-size:11px;color:#fff;margin-top:4px;">' + getDreamName(id) + '</div></div>';
-    });
-  }
+  var showList = participants.length > 0 ? participants : (session.invited || []);
+  showList.forEach(function(id) {
+    var av = getDreamAvatar(id);
+    avatarsHtml += '<div style="text-align:center;"><img src="' + av + '" style="width:50px;height:50px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.3);"><div style="font-size:11px;color:#fff;margin-top:4px;">' + getDreamName(id) + '</div></div>';
+  });
   avatarsHtml += '</div>';
 
-  var existing = card.querySelector('.multi-avatars');
-  if (existing) existing.remove();
   var div = document.createElement('div');
   div.className = 'multi-avatars';
   div.innerHTML = avatarsHtml;
@@ -3782,23 +3794,29 @@ function renderCallUI() {
   if (originalAvatar) originalAvatar.style.display = 'none';
   card.insertBefore(div, card.firstChild);
 
+  // 状态文字
   var statusEl = document.getElementById('callStatus');
   if (statusEl) {
     if (session.status === 'dialing') statusEl.textContent = '正在呼叫…';
+    else if (session.status === 'ringing') statusEl.textContent = '来电中…';
     else if (session.status === 'connected') statusEl.textContent = '通话中';
     else statusEl.textContent = '';
   }
 
+  // 计时器
   var timerEl = document.getElementById('callTimer');
   if (timerEl) {
     if (session.status === 'connected') timerEl.classList.add('show');
     else timerEl.classList.remove('show');
   }
 
+  // 按钮
   var btns = document.getElementById('callButtons');
   if (btns) {
     if (session.status === 'dialing') {
       btns.innerHTML = '<button class="call-btn hangup" onclick="cancelDial()">☎</button>';
+    } else if (session.status === 'ringing') {
+      btns.innerHTML = '<button class="call-btn hangup" onclick="hangupCall()">☎</button><button class="call-btn answer" onclick="answerCall()">📞</button>';
     } else {
       btns.innerHTML = '<button class="call-btn minimize" onclick="minimizeCall()">−</button><button class="call-btn hangup" onclick="hangupCall()">☎</button>';
     }
