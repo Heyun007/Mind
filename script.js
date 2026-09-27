@@ -6155,27 +6155,21 @@ function closeWelcome() {
 
 // 等页面加载后自动检查
 
-// ===== 修复长按消息菜单：点空白处关闭 =====
-document.addEventListener('click', function(e) {
-  var mask = document.getElementById('msgMenuMask');
-  var menu = document.getElementById('msgMenu');
-  if (!mask || !menu) return;
-  if (menu.style.display === 'none') return;
-  // 如果点的不是菜单本身，就关闭菜单
-  if (!menu.contains(e.target)) {
-    hideMsgMenu();
+// ===== 修复长按菜单：点遮罩关闭 =====
+(function() {
+  function bind() {
+    var mask = document.getElementById('msgMenuMask');
+    if (mask && !mask._bound) {
+      mask._bound = true;
+      mask.addEventListener('click', function() {
+        hideMsgMenu();
+      });
+      mask.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        hideMsgMenu();
+      }, { passive: false });
+    }
   }
-}, true);
-
-document.addEventListener('touchstart', function(e) {
-  var mask = document.getElementById('msgMenuMask');
-  var menu = document.getElementById('msgMenu');
-  if (!mask || !menu) return;
-  if (menu.style.display === 'none') return;
-  if (!menu.contains(e.target)) {
-    hideMsgMenu();
-  }
-}, true);
-window.addEventListener('load', function() {
-  setTimeout(showWelcomeIfFirstTime, 300);
-});
+  bind();
+  setTimeout(bind, 500);
+})();
