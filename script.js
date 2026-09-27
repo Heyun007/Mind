@@ -1451,8 +1451,12 @@ function aiGroupOwnerAction(g) {
   } else {
     if (otherMembers.length === 0) return;
     targetId = otherMembers[Math.floor(Math.random() * otherMembers.length)];
-    target = state.dreams.find(function(d) { return d.id === targetId; });
-    if (!target) return;
+    if (targetId === 'user') {
+  target = { id: 'user', name: state.profile.name || '我' };
+} else {
+  target = state.dreams.find(function(d) { return d.id === targetId; });
+}
+if (!target) return;
 
     // 让 AI 有概率把群主转让给用户
 if (Math.random() < 1) otherMembers.push('user');
