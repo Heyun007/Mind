@@ -325,9 +325,7 @@
     <h2>字卡功能</h2>
   </div>
   <div class="page-body">
-    <button class="add-cat-btn" onclick="addCategory()">+ 添加分类标签</button>
     <div id="wordCardsContainer"></div>
-    
     <!-- 导入字卡区域 -->
     <div style="margin-top:16px; border-top:1px dashed var(--border); padding-top:16px;">
       <label style="font-size:13px;font-weight:500;color:var(--gray);display:block;margin-bottom:4px">导入外部字卡</label>
@@ -336,17 +334,18 @@
         <input type="file" id="importCardInput" accept=".json" style="display:none" onchange="handleImportCards(event)">
       </div>
     </div>
+  </div>
+</div>
 
-    <!-- 批量添加区域 -->
-    <div class="batch-add-area" style="margin-top:16px">
-      <label style="font-size:13px;font-weight:500;color:var(--gray);display:block;margin-bottom:4px">批量添加字卡（每行一个）</label>
-      <textarea id="batchText" placeholder="怎么还没睡？&#10;又在看手机？&#10;想我了没？"></textarea>
-      <select id="batchCategory" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;margin-bottom:8px;outline:none;background:var(--card);color:var(--text);"></select>
-      <div class="batch-actions">
-        <button class="btn-add" onclick="batchAddCards()">批量添加</button>
-        <button class="btn-clear" onclick="document.getElementById('batchText').value=''">清空</button>
-      </div>
-    </div>
+<!-- ===== PAGE: Stickers ===== -->
+<div class="page" id="pageStickers">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>表情包</h2>
+    <button onclick="addStickerGroup()" style="width:32px;height:32px;border:none;background:transparent;font-size:18px;cursor:pointer;color:var(--blue);display:flex;align-items:center;justify-content:center;">+</button>
+  </div>
+  <div class="page-body" style="padding:0;">
+    <div id="stickerGroupsContainer" style="padding:12px 16px;"></div>
   </div>
 </div>
 
@@ -635,6 +634,26 @@
         <option value="3600000">1小时</option>
       </select>
     </div>
+        <div class="setting-item" style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="si-left">
+        <span class="si-label">拼接字卡</span>
+        <span class="si-desc">开启后梦角一次发多条字卡</span>
+      </div>
+      <div class="setting-toggle" id="cardJoinToggle">
+        <div class="toggle-knob"></div>
+      </div>
+    </div>
+    <div class="setting-item" style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="si-left">
+        <span class="si-label">拼接数量（最少 ~ 最多）</span>
+        <span class="si-desc">最多 7 条</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input type="number" id="cardJoinMin" min="1" max="7" value="1" style="width:52px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:14px;text-align:center;outline:none;">
+        <span style="font-size:13px;color:var(--gray);">~</span>
+        <input type="number" id="cardJoinMax" min="1" max="7" value="3" style="width:52px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:14px;text-align:center;outline:none;">
+      </div>
+    </div>
     <div class="setting-item" onclick="document.getElementById('callBgInput').click()">
       <div class="si-left">
         <span class="si-label">语音通话背景</span>
@@ -764,6 +783,22 @@
 </div>
 
 <!-- Toast -->
+ <div id="addCardModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:900;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:16px;padding:20px;width:100%;max-width:360px;box-sizing:border-box;">
+    <div style="font-size:15px;font-weight:600;margin-bottom:14px;color:#1d1d1f;">添加字卡</div>
+    <div style="display:flex;gap:6px;margin-bottom:14px;">
+      <button id="addCardTabSingle" onclick="switchAddCardTab('single')" style="flex:1;padding:8px;border:none;border-radius:10px;font-size:13px;cursor:pointer;background:#007aff;color:#fff;">单条</button>
+      <button id="addCardTabBatch" onclick="switchAddCardTab('batch')" style="flex:1;padding:8px;border:none;border-radius:10px;font-size:13px;cursor:pointer;background:#f0f0f5;color:#555;">批量</button>
+    </div>
+    <select id="addCardCatSelect" style="width:100%;padding:10px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;margin-bottom:10px;background:#fff;box-sizing:border-box;outline:none;"></select>
+    <input type="text" id="addCardTextInput" placeholder="输入字卡内容" onkeydown="if(event.key==='Enter')confirmAddCard()" style="width:100%;padding:10px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;margin-bottom:14px;box-sizing:border-box;outline:none;">
+    <textarea id="addCardBatchInput" placeholder="每行一条字卡&#10;例如：&#10;怎么还没睡？&#10;想我了没？" style="display:none;width:100%;padding:10px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;margin-bottom:14px;box-sizing:border-box;outline:none;min-height:120px;resize:vertical;font-family:inherit;"></textarea>
+    <div style="display:flex;gap:8px;">
+      <button onclick="closeAddCardModal()" style="flex:1;padding:10px;border:1px solid #e5e5ea;background:transparent;border-radius:10px;font-size:14px;cursor:pointer;color:#1d1d1f;">取消</button>
+      <button onclick="confirmAddCard()" style="flex:1;padding:10px;border:none;background:#007aff;color:#fff;border-radius:10px;font-size:14px;cursor:pointer;">添加</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
   <!-- 首次进入欢迎面板 -->
