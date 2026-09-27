@@ -42,7 +42,7 @@ let state = {
   callHistory: [],
   activeCalls: [], // 所有正在进行的通话（包括AI发起的）
   checkinHistory: [],
-  settings: { callBg: null, checkinBg: null, pushEnabled: false, customIcons: {} },
+  settings: { callBg: null, checkinBg: null, pushEnabled: false, customIcons: {}, currentStickerGroupId: 'default' },
   callState: 'idle',
   callTimerInterval: null,
   callStartTime: null,
@@ -70,28 +70,36 @@ const ICONS_CONFIG = [
   { key: 'pageDiary', name: '日记', emoji: '📔', color: 'icon-orange' },
   { key: 'pageCompanion', name: '陪伴', emoji: '🐾', color: 'icon-blue' },
   { key: 'pageMailbox', name: '信箱', emoji: '✉️', color: 'icon-blue' },
+  { key: 'pageStickers', name: '表情包', emoji: '😀', color: 'icon-blue' },
 ];
 
 // ===== 1. 渲染主页图标 =====
-var APP_PER_PAGE = 24; // 每页 4×6
+var APP_PER_PAGE = 12; // 每页 3×4
 
 function initAppPages() {
-  // 如果已有数据，先检查有没有被拖拽 bug 弄丢图标
+  var allKeys = ICONS_CONFIG.map(function(item) { return item.key; });
+
   if (state.appPages && Array.isArray(state.appPages) && state.appPages.length > 0) {
-    var allKeys = ICONS_CONFIG.map(function(item) { return item.key; });
-    var foundKeys = [];
-    state.appPages.forEach(function(pageKeys) {
-      if (!Array.isArray(pageKeys)) return;
-      pageKeys.forEach(function(k) {
-        if (k && allKeys.indexOf(k) > -1 && foundKeys.indexOf(k) === -1) foundKeys.push(k);
-      });
+    var existing = [];
+    state.appPages.forEach(function(page) {
+      if (Array.isArray(page)) {
+        page.forEach(function(k) {
+          if (k && existing.indexOf(k) === -1) existing.push(k);
+        });
+      }
     });
-    // 所有图标都在 → 数据正常，保留用户排列
-    if (foundKeys.length === allKeys.length) return;
-    // 有图标丢失 → 数据被 bug 弄坏了，重置为默认排列
+    var missing = allKeys.filter(function(k) { return existing.indexOf(k) === -1; });
+
+    if (missing.length === 0 && existing.length === allKeys.length) {
+      // 数据正常，保留用户排列
+      return;
+    }
+
+    // 图标数量变了（比如新增了「表情包」），且每页容量变小了 → 重置为默认布局
     state.appPages = null;
   }
-  var keys = ICONS_CONFIG.map(function(item) { return item.key; });
+
+  var keys = allKeys;
   var pages = [];
   for (var i = 0; i < keys.length; i += APP_PER_PAGE) {
     pages.push(keys.slice(i, i + APP_PER_PAGE));
@@ -363,6 +371,7 @@ function navigateTo(pageId) {
   // 6. 根据页面触发对应的渲染逻辑
   try {
     if (pageId === 'pageWordCards') renderWordCards();
+    if (pageId === 'pageStickers') renderStickerGroups();
     if (pageId === 'pageCallHistory') renderCallHistory();
     if (pageId === 'pageCheckinHistory') renderCheckinHistory();
     if (pageId === 'pageProfile') loadProfileForm();
@@ -538,58 +547,245 @@ function deleteDreamRole() {
 
 // ===== WORD CARDS =====
 // ===== 替换 renderWordCards 函数 =====
-function renderWordCards() {
-  const catSelect = document.getElementById('batchCategory');
-  if (catSelect) {
-    catSelect.innerHTML = state.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+// 获取所有可用字卡（未被屏蔽）
+function getUsableCards() {
+  return (state.cards || []).filter(function(c) {
+    return isCardUsable(c);
+  });
+}
+
+// 根据拼接设置生成梦角要发送的文字
+function buildCardText(availableCards) {
+  if (!availableCards || availableCards.length === 0) return '…';
+  var s = state.settings || {};
+  var useJoin = !!s.cardJoinEnabled;
+  var minN = Math.max(1, Math.min(7, parseInt(s.cardJoinMin) || 1));
+  var maxN = Math.max(minN, Math.min(7, parseInt(s.cardJoinMax) || 1));
+  var count = 1;
+  if (useJoin) {
+    count = minN + Math.floor(Math.random() * (maxN - minN + 1));
+    if (count > availableCards.length) count = availableCards.length;
   }
-  const container = document.getElementById('wordCardsContainer');
-  container.innerHTML = '';
-  
-  state.categories.forEach(cat => {
-    const cards = state.cards.filter(c => c.cat === cat.id);
-    const group = document.createElement('div');
-    group.className = 'category-group';
-    const collapsed = cat.collapsed || false;
-    
-    // 生成字卡列表的 HTML
-    let cardsHtml = '';
+  var shuffled = availableCards.slice().sort(function() { return Math.random() - 0.5; });
+  var picked = shuffled.slice(0, count);
+  var texts = picked.map(function(c) { return c.text; }).filter(function(t) { return t; });
+  if (texts.length === 0) return '…';
+  return texts.join('，');
+}
+
+function renderWordCards() {
+  var container = document.getElementById('wordCardsContainer');
+  if (!container) return;
+
+  var searchTerm = (window._cardSearchTerm || '').trim();
+
+  var toolbarHtml = '<div class="card-toolbar">';
+  toolbarHtml += '<div class="card-toolbar-row">';
+  toolbarHtml += '<button class="card-toolbar-btn" onclick="addCategory()">+ 分类</button>';
+  toolbarHtml += '<button class="card-toolbar-btn" onclick="openAddCardModal()">+ 字卡</button>';
+  toolbarHtml += '<button class="card-toolbar-btn" onclick="dedupeCards()">去重</button>';
+  toolbarHtml += '</div>';
+  toolbarHtml += '<input class="card-search" type="text" placeholder="🔍 搜索字卡" value="' + (searchTerm || '').replace(/"/g, '&quot;') + '" oninput="onCardSearch(this.value)">';
+  toolbarHtml += '</div>';
+
+  if (searchTerm) {
+    var matched = state.cards.filter(function(c) {
+      return c.text && c.text.indexOf(searchTerm) > -1;
+    });
+    var body = '';
+    if (matched.length === 0) {
+      body = '<div class="card-empty">没有找到包含「' + searchTerm + '」的字卡</div>';
+    } else {
+      body = '<div class="card-count">找到 ' + matched.length + ' 条</div>';
+      body += '<div class="card-list">';
+      matched.forEach(function(c) { body += renderSingleCardHtml(c); });
+      body += '</div>';
+    }
+    container.innerHTML = toolbarHtml + body;
+    return;
+  }
+
+  var groupsHtml = '';
+  state.categories.forEach(function(cat) {
+    var cards = state.cards.filter(function(c) { return c.cat === cat.id; });
+    var collapsed = cat.collapsed || false;
+    var catBlocked = cat.blocked || false;
+
+    var cardsHtml = '';
     if (cards.length === 0) {
-      cardsHtml = '<div style="font-size:12px;color:var(--gray);padding:4px 0;">暂无字卡</div>';
+      cardsHtml = '<div class="card-empty-inline">暂无字卡</div>';
     } else {
       cardsHtml = '<div class="card-list">';
-      cards.forEach(c => {
-        cardsHtml += `
-          <div class="card-item">
-            <div class="card-item-text">${c.text}</div>
-            <div class="card-item-actions">
-              <span onclick="editCard('${c.id}')" title="编辑">✎</span>
-              <span onclick="deleteCard('${c.id}')" title="删除">🗑️</span>
-            </div>
-          </div>
-        `;
-      });
+      cards.forEach(function(c) { cardsHtml += renderSingleCardHtml(c); });
       cardsHtml += '</div>';
     }
 
-    group.innerHTML = `
-      <div class="category-header" onclick="toggleCategory('${cat.id}')">
-        <span class="cat-name">${cat.name}（${cards.length}）</span>
-        <div>
-          <span class="delete-cat-btn" onclick="event.stopPropagation();deleteCategory('${cat.id}')">🗑</span>
-          <span class="cat-toggle ${collapsed ? 'collapsed' : ''}">▼</span>
-        </div>
-      </div>
-      <div class="category-body ${collapsed ? 'hidden' : ''}" id="catBody_${cat.id}">
-        ${cardsHtml}
-        <div class="add-card-area" style="margin-top:12px;">
-          <input type="text" id="cardInput_${cat.id}" placeholder="输入新字卡" onkeydown="if(event.key==='Enter')addCard('${cat.id}')">
-          <button onclick="addCard('${cat.id}')">添加</button>
-        </div>
-      </div>
-    `;
-    container.appendChild(group);
+    groupsHtml += '<div class="category-group' + (catBlocked ? ' blocked' : '') + '">';
+    groupsHtml += '<div class="category-header" onclick="toggleCategory(\'' + cat.id + '\')">';
+    groupsHtml += '<span class="cat-name">' + cat.name + '（' + cards.length + '）</span>';
+    groupsHtml += '<div class="cat-actions">';
+    groupsHtml += '<span class="cat-action" onclick="event.stopPropagation();toggleBlockCategory(\'' + cat.id + '\')" title="屏蔽本组">' + (catBlocked ? '🔇' : '🔊') + '</span>';
+    groupsHtml += '<span class="cat-action" onclick="event.stopPropagation();deleteCategory(\'' + cat.id + '\')" title="删除本组">🗑</span>';
+    groupsHtml += '<span class="cat-toggle' + (collapsed ? ' collapsed' : '') + '">▼</span>';
+    groupsHtml += '</div>';
+    groupsHtml += '</div>';
+    groupsHtml += '<div class="category-body' + (collapsed ? ' hidden' : '') + '">';
+    groupsHtml += cardsHtml;
+    groupsHtml += '</div>';
+    groupsHtml += '</div>';
   });
+
+  container.innerHTML = toolbarHtml + groupsHtml;
+}
+
+function renderSingleCardHtml(c) {
+  var blocked = c.blocked || false;
+  var html = '<div class="card-item' + (blocked ? ' blocked' : '') + '">';
+  html += '<div class="card-item-text">' + (c.text || '') + '</div>';
+  html += '<div class="card-item-actions">';
+  html += '<span onclick="toggleBlockCard(\'' + c.id + '\')" title="' + (blocked ? '取消屏蔽' : '屏蔽') + '">' + (blocked ? '🔇' : '🔊') + '</span>';
+  html += '<span onclick="editCard(\'' + c.id + '\')" title="编辑">✎</span>';
+  html += '<span onclick="deleteCard(\'' + c.id + '\')" title="删除">🗑️</span>';
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+
+window._addCardTab = 'single';
+
+function openAddCardModal() {
+  var sel = document.getElementById('addCardCatSelect');
+  if (!sel) return;
+  sel.innerHTML = state.categories.map(function(c) {
+    return '<option value="' + c.id + '">' + c.name + '</option>';
+  }).join('');
+  document.getElementById('addCardTextInput').value = '';
+  document.getElementById('addCardBatchInput').value = '';
+  switchAddCardTab('single');
+  document.getElementById('addCardModal').style.display = 'flex';
+  setTimeout(function() {
+    var inp = document.getElementById('addCardTextInput');
+    if (inp) inp.focus();
+  }, 100);
+}
+
+function switchAddCardTab(tab) {
+  window._addCardTab = tab;
+  var single = document.getElementById('addCardTabSingle');
+  var batch = document.getElementById('addCardTabBatch');
+  var textInp = document.getElementById('addCardTextInput');
+  var batchInp = document.getElementById('addCardBatchInput');
+  if (tab === 'single') {
+    single.style.background = '#007aff';
+    single.style.color = '#fff';
+    batch.style.background = '#f0f0f5';
+    batch.style.color = '#555';
+    textInp.style.display = 'block';
+    batchInp.style.display = 'none';
+    textInp.focus();
+  } else {
+    batch.style.background = '#007aff';
+    batch.style.color = '#fff';
+    single.style.background = '#f0f0f5';
+    single.style.color = '#555';
+    textInp.style.display = 'none';
+    batchInp.style.display = 'block';
+    batchInp.focus();
+  }
+}
+
+function closeAddCardModal() {
+  var m = document.getElementById('addCardModal');
+  if (m) m.style.display = 'none';
+}
+
+function confirmAddCard() {
+  var catId = document.getElementById('addCardCatSelect').value;
+  var tab = window._addCardTab || 'single';
+
+  if (tab === 'single') {
+    var text = (document.getElementById('addCardTextInput').value || '').trim();
+    if (!text) { showToast('请输入字卡内容'); return; }
+    var exists = state.cards.some(function(c) { return (c.text || '').trim() === text; });
+    if (exists) { showToast('该字卡已存在，已跳过'); return; }
+    state.cards.push({ id: 'card_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), text: text, cat: catId });
+    saveState();
+    renderWordCards();
+    closeAddCardModal();
+    showToast('已添加');
+  } else {
+    var raw = document.getElementById('addCardBatchInput').value || '';
+    var lines = raw.split('\n').map(function(s) { return s.trim(); }).filter(function(s) { return s; });
+    if (lines.length === 0) { showToast('请输入字卡'); return; }
+    var existing = {};
+    state.cards.forEach(function(c) { existing[(c.text || '').trim()] = true; });
+    var added = 0, skipped = 0;
+    lines.forEach(function(line) {
+      if (existing[line]) { skipped++; return; }
+      state.cards.push({ id: 'card_' + Date.now() + '_' + Math.random().toString(36).slice(2,8), text: line, cat: catId });
+      existing[line] = true;
+      added++;
+    });
+    saveState();
+    renderWordCards();
+    closeAddCardModal();
+    if (skipped > 0) showToast('已添加 ' + added + ' 条，跳过 ' + skipped + ' 条重复');
+    else showToast('已添加 ' + added + ' 条');
+  }
+}
+
+function onCardSearch(val) {
+  window._cardSearchTerm = val || '';
+  renderWordCards();
+  var inp = document.querySelector('.card-search');
+  if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+}
+
+function dedupeCards() {
+  var seen = {};
+  var dupes = [];
+  state.cards.forEach(function(c) {
+    var key = (c.text || '').trim();
+    if (!key) return;
+    if (seen[key] !== undefined) dupes.push(c.id);
+    else seen[key] = c.id;
+  });
+  if (dupes.length === 0) {
+    alert('没有发现重复的字卡 ✓');
+    return;
+  }
+  if (!confirm('发现 ' + dupes.length + ' 条重复字卡，是否删除？\n\n（每组重复只保留一条）')) return;
+  state.cards = state.cards.filter(function(c) { return dupes.indexOf(c.id) === -1; });
+  saveState();
+  renderWordCards();
+  showToast('已删除 ' + dupes.length + ' 条重复字卡');
+}
+
+function toggleBlockCard(cardId) {
+  var c = state.cards.find(function(x) { return x.id === cardId; });
+  if (!c) return;
+  c.blocked = !c.blocked;
+  saveState();
+  renderWordCards();
+  showToast(c.blocked ? '已屏蔽' : '已启用');
+}
+
+function toggleBlockCategory(catId) {
+  var cat = state.categories.find(function(x) { return x.id === catId; });
+  if (!cat) return;
+  cat.blocked = !cat.blocked;
+  saveState();
+  renderWordCards();
+  showToast(cat.blocked ? '已屏蔽此分组' : '已启用此分组');
+}
+
+function isCardUsable(card) {
+  if (!card) return false;
+  if (card.blocked) return false;
+  var cat = state.categories.find(function(c) { return c.id === card.cat; });
+  if (cat && cat.blocked) return false;
+  return true;
 }
 
 // ===== 新增：编辑单条字卡 =====
@@ -646,16 +842,6 @@ function deleteCategory(catId) {
   showToast('分类已删除');
 }
 
-function addCard(catId) {
-  const input = document.getElementById('cardInput_' + catId);
-  const text = input.value.trim();
-  if (!text) return;
-  state.cards.push({ id: 'card_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), text, cat: catId });
-  input.value = '';
-  saveState();
-  renderWordCards();
-}
-
 function deleteCard(cardId) {
   state.cards = state.cards.filter(c => c.id !== cardId);
   saveState();
@@ -663,16 +849,23 @@ function deleteCard(cardId) {
 }
 
 function batchAddCards() {
-  const text = document.getElementById('batchText').value;
-  const lines = text.split('\n').map(s => s.trim()).filter(s => s);
+  var text = document.getElementById('batchText').value;
+  var lines = text.split('\n').map(function(s){return s.trim();}).filter(function(s){return s;});
   if (lines.length === 0) { showToast('请输入字卡'); return; }
-  const targetCat = document.getElementById('batchCategory').value || state.categories[0]?.id || 'default';
-  lines.forEach(line => {
+  var targetCat = document.getElementById('batchCategory').value || (state.categories[0] && state.categories[0].id) || 'default';
+  var existing = {};
+  state.cards.forEach(function(c) { existing[(c.text || '').trim()] = true; });
+  var added = 0, skipped = 0;
+  lines.forEach(function(line) {
+    if (existing[line]) { skipped++; return; }
     state.cards.push({ id: 'card_' + Date.now() + '_' + Math.random().toString(36).slice(2,8), text: line, cat: targetCat });
+    existing[line] = true;
+    added++;
   });
   saveState();
   renderWordCards();
-  showToast('已添加 ' + lines.length + ' 个字卡');
+  if (skipped > 0) showToast('已添加 ' + added + ' 条，跳过 ' + skipped + ' 条重复');
+  else showToast('已添加 ' + added + ' 条');
 }
 
 // ===== CALL HISTORY =====
@@ -757,6 +950,7 @@ function backupData() {
     chatMessages: chatMessages,
     // 补充：表情包、私聊背景、陪伴设置、聊天设置
     stickers: JSON.parse(localStorage.getItem('dreamStickers') || '[]'),
+    stickerGroups: stickerGroups,
     dreamChatBg: localStorage.getItem('dreamChatBg') || null,
     dreamChatSettings: localStorage.getItem('dreamChatSettings') || null,
     comp_bg: localStorage.getItem('comp_bg') || null,
@@ -790,10 +984,19 @@ function restoreData(e) {
         Object.assign(state, data);
         if (data.chatMessages) chatMessages = data.chatMessages;
       }
-      // 恢复表情包
-      if (data.stickers) {
-        try { localStorage.setItem('dreamStickers', JSON.stringify(data.stickers)); } catch(e) {}
-      }
+           // 恢复表情包（新结构）
+      if (data.stickerGroups && Array.isArray(data.stickerGroups)) {
+        try {
+          localStorage.setItem('dreamStickerGroups', JSON.stringify(data.stickerGroups));
+          stickerGroups = data.stickerGroups;
+        } catch(e) {}
+      } else if (data.stickers && Array.isArray(data.stickers)) {
+        var oldGroups = [{ id: 'default', name: '默认', items: data.stickers }];
+        try {
+          localStorage.setItem('dreamStickerGroups', JSON.stringify(oldGroups));
+          stickerGroups = oldGroups;
+        } catch(e) {}
+      } 
       // 恢复私聊聊天背景
       if (data.dreamChatBg) {
         localStorage.setItem('dreamChatBg', data.dreamChatBg);
@@ -884,7 +1087,7 @@ function triggerRandomEvent() {
 } else if (r < 0.075) {
   if (state.callState === 'idle') triggerCheckin();
 } else {
-    var allCards = state.cards || [];
+          var allCards = getUsableCards();
     if (allCards.length > 0 && state.dreams && state.dreams.length > 0) {
       var card = allCards[Math.floor(Math.random() * allCards.length)];
       
@@ -1088,7 +1291,7 @@ function triggerCheckin() {
   }
   if (!checker) checker = state.dream || { name: '沈屿', avatar: '' };
 
-  var allCards = state.cards;
+    var allCards = getUsableCards();
   if (allCards.length === 0) return;
   
   const count = 1;
@@ -1169,7 +1372,49 @@ async function sendNotification(title, body) {
 // ===== CHAT =====
 let chatMessages = [];
 let chatSettings = loadChatSettings();
-let stickers = JSON.parse(localStorage.getItem('dreamStickers') || '[]');
+// ===== 表情包分组数据 =====
+var stickerGroups = loadStickerGroups();
+var currentStickerGroupId = 'default';
+
+function loadStickerGroups() {
+  var saved = localStorage.getItem('dreamStickerGroups');
+  if (saved) {
+    try {
+      var parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch(e) {}
+  }
+  // 迁移旧的 stickers 数组到默认分组
+  var old = [];
+  try { old = JSON.parse(localStorage.getItem('dreamStickers') || '[]'); } catch(e) {}
+  var groups = [{ id: 'default', name: '默认', items: old }];
+  try { localStorage.setItem('dreamStickerGroups', JSON.stringify(groups)); } catch(e) {}
+  return groups;
+}
+
+function saveStickerGroups() {
+  try { localStorage.setItem('dreamStickerGroups', JSON.stringify(stickerGroups)); } catch(e) {}
+}
+
+function getCurrentStickerGroup() {
+  var g = stickerGroups.find(function(x) { return x.id === currentStickerGroupId; });
+  if (!g) {
+    g = stickerGroups[0];
+    currentStickerGroupId = g ? g.id : 'default';
+  }
+  return g;
+}
+
+// 兼容旧代码：把所有分组的表情包平铺成一个数组
+function getAllStickers() {
+  var arr = [];
+  stickerGroups.forEach(function(g) {
+    (g.items || []).forEach(function(item, idx) {
+      arr.push({ groupId: g.id, index: idx, data: item });
+    });
+  });
+  return arr;
+}
 
 function saveChatMessages() {
   if (!state.currentChatId) return;
@@ -1236,7 +1481,7 @@ function sendChatMsg() {
 }
 
 function dreamReply() {
-  var cards = state.cards || [];
+   var cards = getUsableCards();
     // 【强制已读】：AI 只要开始回复，用户的上一条消息必定变成已读
   for (var i = 0; i < chatMessages.length; i++) {
     if (chatMessages[i].from === 'user') {
@@ -1377,10 +1622,10 @@ if (usePoke) {
     senderId: senderId,
     time: Date.now()
   });
-} else if (useCard) {
-  var idx = Math.floor(Math.random() * cards.length);
-  chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: cards[idx].text || '…', time: Date.now() });
-} else if (useSticker) {
+} else   if (useCard) {
+    var finalText = buildCardText(cards);
+    chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: finalText, time: Date.now() });
+  } else if (useSticker) {
   var lastMsg = chatMessages[chatMessages.length - 1];
   if (lastMsg === undefined || lastMsg === null) lastMsg = { from: 'system' };
   if (stickers.length > 1 && lastMsg.from === 'user' && lastMsg.stickerIdx !== undefined) {
@@ -1624,7 +1869,7 @@ function renderChatMessages() {
         quoteHtml = '<div style="font-size:11px;opacity:0.7;padding:4px 8px;margin-bottom:4px;background:rgba(0,0,0,0.06);border-left:2px solid #999;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;">' + m.quote.senderName + '：' + m.quote.text + '</div>';
       }
       if (imgSrc) {
-        html += '<div class="' + bubbleClass + '" style="' + userBg + textColor + 'padding:4px;">' + quoteHtml + '<img src="' + imgSrc + '" style="width:120px;height:120px;border-radius:6px;object-fit:cover;display:block;"></div>';
+        html += '<div class="' + bubbleClass + '" style="' + userBg + textColor + 'padding:4px;">' + quoteHtml + '<img src="' + imgSrc + '" style="max-width:120px;max-height:180px;border-radius:6px;object-fit:contain;display:block;"></div>';
       } else {
         html += '<div class="' + bubbleClass + '" style="' + userBg + textColor + '">' + quoteHtml + m.text + '</div>';
       }
@@ -1661,7 +1906,7 @@ function renderChatMessages() {
         quoteHtml = '<div style="font-size:11px;opacity:0.7;padding:4px 8px;margin-bottom:4px;background:rgba(0,0,0,0.06);border-left:2px solid #999;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;">' + m.quote.senderName + '：' + m.quote.text + '</div>';
       }
       if (imgSrc) {
-        html += '<div class="' + bubbleClass + '" style="' + dreamBg + textColor + 'padding:4px;">' + quoteHtml + '<img src="' + imgSrc + '" style="width:120px;height:120px;border-radius:6px;object-fit:cover;display:block;"></div>';
+        html += '<div class="' + bubbleClass + '" style="' + dreamBg + textColor + 'padding:4px;">' + quoteHtml + '<img src="' + imgSrc + '" style="max-width:120px;max-height:180px;border-radius:6px;object-fit:contain;display:block;"></div>';
       } else {
         html += '<div class="' + bubbleClass + '" style="' + dreamBg + textColor + '">' + quoteHtml + m.text + '</div>';
       }
@@ -1816,44 +2061,79 @@ var isEditingStickers = false;
 function renderStickers() {
   var panel = document.getElementById('stickerPanel');
   if (!panel) return;
-  
+
+  if (state.settings && state.settings.currentStickerGroupId) {
+    currentStickerGroupId = state.settings.currentStickerGroupId;
+  }
+
   var html = '';
-  
-  // 顶部工具栏：编辑/完成 按钮
-  html += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">';
-  html += '<span style="font-size:12px; color:var(--gray);">' + (isEditingStickers ? '点击表情删除' : '表情包') + '</span>';
-  html += '<button onclick="toggleStickerEditMode()" style="font-size:12px; padding:2px 10px; border-radius:10px; border:1px solid var(--border); background:' + (isEditingStickers ? 'var(--red)' : 'var(--card)') + '; color:' + (isEditingStickers ? '#fff' : 'var(--blue)') + ';">' + (isEditingStickers ? '完成' : '编辑') + '</button>';
+
+  html += '<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid var(--border);flex-shrink:0;position:sticky;top:0;background:var(--card);z-index:5;-webkit-overflow-scrolling:touch;">';
+  stickerGroups.forEach(function(g) {
+    var active = g.id === currentStickerGroupId;
+    html += '<span onclick="switchStickerGroup(\'' + g.id + '\')" style="flex-shrink:0;padding:6px 16px;border-radius:16px;font-size:13px;cursor:pointer;background:' + (active ? 'var(--blue)' : '#f0f0f5') + ';color:' + (active ? '#fff' : 'var(--text)') + ';white-space:nowrap;">' + g.name + '</span>';
+  });
   html += '</div>';
-  
+
+  var currentGroup = getCurrentStickerGroup();
+  var items = currentGroup ? (currentGroup.items || []) : [];
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+  html += '<span style="font-size:12px;color:var(--gray);">' + (isEditingStickers ? '点击表情删除' : '表情包') + '</span>';
+  html += '<button onclick="toggleStickerEditMode()" style="font-size:12px;padding:2px 10px;border-radius:10px;border:1px solid var(--border);background:' + (isEditingStickers ? 'var(--red)' : 'var(--card)') + ';color:' + (isEditingStickers ? '#fff' : 'var(--blue)') + ';">' + (isEditingStickers ? '完成' : '编辑') + '</button>';
+  html += '</div>';
+
   html += '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px;">';
-  
-  // 添加按钮（只在非编辑模式下显示）
-  if (!isEditingStickers) {
-    html += '<div onclick="document.getElementById(\'stickerInput\').click()" style="width:60px;height:60px;border:2px dashed var(--border);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--gray);cursor:pointer;flex-shrink:0;">+</div>';
-  }
-  
-  // 渲染现有的表情包
-  for (var i = 0; i < stickers.length; i++) {
-    html += '<div class="sticker-item" style="position:relative;width:60px;height:60px;flex-shrink:0;">';
-    
-        if (isEditingStickers) {
-      // 编辑模式下，点击图片本身不做操作，重点在叉号上！
-      html += '<img src="' + stickers[i] + '" style="width:60px;height:60px;border-radius:8px;object-fit:cover;opacity:0.5;pointer-events:none;">';
-      // 把删除事件绑定在叉号上，点击直接删（去掉了confirm弹窗，手机端爽飞）
-      html += '<span onclick="deleteSticker(' + i + ')" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--red);color:#fff;font-size:14px;text-align:center;line-height:20px;cursor:pointer;z-index:10;">×</span>';
-    } else {
-      // 正常模式下，点击图片进行发送
-      html += '<img src="' + stickers[i] + '" onclick="sendSticker(' + i + ')" style="width:60px;height:60px;border-radius:8px;object-fit:cover;cursor:pointer;">';
+  if (items.length === 0) {
+    html += '<div style="width:100%;text-align:center;color:var(--gray);font-size:13px;padding:20px;">这个分组还没有表情包<br><span style="font-size:11px;">去主屏幕的「表情包」图标里添加</span></div>';
+  } else {
+    for (var i = 0; i < items.length; i++) {
+      html += '<div class="sticker-item" style="position:relative;width:60px;height:60px;flex-shrink:0;">';
+      if (isEditingStickers) {
+        html += '<img src="' + items[i] + '" style="width:60px;height:60px;max-width:60px;max-height:60px;object-fit:contain;display:block;opacity:0.5;pointer-events:none;">';
+        html += '<span onclick="deleteStickerFromChatPanel(\'' + currentStickerGroupId + '\',' + i + ')" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--red);color:#fff;font-size:14px;text-align:center;line-height:20px;cursor:pointer;z-index:10;">×</span>';
+      } else {
+        html += '<img src="' + items[i] + '" onclick="sendStickerFromGroup(\'' + currentStickerGroupId + '\',' + i + ')" style="width:60px;height:60px;max-width:60px;max-height:60px;object-fit:contain;display:block;cursor:pointer;">';
+      }
+      html += '</div>';
     }
-    
-    html += '</div>';
   }
   html += '</div>';
-  
-  // 动态生成支持多选的文件输入框
-  html += '<input type="file" id="stickerInput" accept="image/*" multiple style="display:none" onchange="addSticker(event)">';
-  
+
   panel.innerHTML = html;
+}
+
+function switchStickerGroup(groupId) {
+  currentStickerGroupId = groupId;
+  if (!state.settings) state.settings = {};
+  state.settings.currentStickerGroupId = groupId;
+  saveState();
+  renderStickers();
+}
+
+function deleteStickerFromChatPanel(groupId, itemIdx) {
+  var g = stickerGroups.find(function(x) { return x.id === groupId; });
+  if (!g) return;
+  g.items.splice(itemIdx, 1);
+  saveStickerGroups();
+  renderStickers();
+  renderChatMessages();
+  showToast('表情包已删除');
+}
+
+function sendStickerFromGroup(groupId, itemIdx) {
+  if (isSendingSticker) return;
+  var g = stickerGroups.find(function(x) { return x.id === groupId; });
+  if (!g || !g.items[itemIdx]) return;
+  isSendingSticker = true;
+  setTimeout(function() { isSendingSticker = false; }, 500);
+
+  chatMessages.push({ from: 'user', text: '[表情]', time: Date.now(), stickerData: g.items[itemIdx] });
+  document.getElementById('chatInput').value = '';
+  renderChatMessages();
+  saveChatMessages();
+  document.getElementById('stickerPanel').style.display = 'none';
+  scheduleAiReply();
 }
 
 function addSticker(e) {
@@ -2318,7 +2598,7 @@ function renderChatMessages() {
       html += '<div data-msg-index="' + i + '" style="display:flex;justify-content:flex-end;align-items:flex-end;gap:8px;margin-bottom:6px;">';
       html += '<div style="max-width:70%;">';
       if (imgSrc) {
-        html += '<div class="chat-bubble bubble-user ' + styleClass + '" style="' + userBg + textColor + 'padding:4px;"><img src="' + imgSrc + '" style="width:120px;height:120px;border-radius:6px;object-fit:cover;display:block;"></div>';
+        html += '<div class="chat-bubble bubble-user ' + styleClass + '" style="' + userBg + textColor + 'padding:4px;"><img src="' + imgSrc + '" style="max-width:120px;max-height:180px;border-radius:6px;object-fit:contain;display:block;"></div>';
       } else {
         html += '<div class="chat-bubble bubble-user ' + styleClass + '" style="' + userBg + textColor + '">' + m.text + '</div>';
       }
@@ -2359,7 +2639,7 @@ html += '<span style="font-size:9px;color:#b0b0b0;display:block;text-align:right
         html += '<span style="font-size:10px;color:#86868b;display:block;margin-bottom:2px;">' + senderName + '</span>';
       }
       if (imgSrc) {
-        html += '<div class="chat-bubble bubble-dream ' + styleClass + '" style="' + dreamBg + textColor + 'padding:4px;"><img src="' + imgSrc + '" style="width:120px;height:120px;border-radius:6px;object-fit:cover;display:block;"></div>';
+        html += '<div class="chat-bubble bubble-dream ' + styleClass + '" style="' + dreamBg + textColor + 'padding:4px;"><img src="' + imgSrc + '" style="max-width:120px;max-height:180px;border-radius:6px;object-fit:contain;display:block;"></div>';
       } else {
         html += '<div class="chat-bubble bubble-dream ' + styleClass + '" style="' + dreamBg + textColor + '">' + m.text + '</div>';
       }
@@ -3474,6 +3754,38 @@ function initSpeedSettings() {
       showToast('主动找我：' + this.options[this.selectedIndex].text);
     };
   }
+    // ===== 拼接字卡设置 =====
+  var joinToggle = document.getElementById('cardJoinToggle');
+  var joinMin = document.getElementById('cardJoinMin');
+  var joinMax = document.getElementById('cardJoinMax');
+  if (joinToggle) {
+    if (!state.settings) state.settings = {};
+    joinToggle.classList.toggle('on', !!state.settings.cardJoinEnabled);
+    joinToggle.onclick = function() {
+      state.settings.cardJoinEnabled = !state.settings.cardJoinEnabled;
+      joinToggle.classList.toggle('on', state.settings.cardJoinEnabled);
+      saveState();
+      showToast(state.settings.cardJoinEnabled ? '已开启拼接字卡' : '已关闭拼接字卡');
+    };
+  }
+  if (joinMin) {
+    joinMin.value = state.settings.cardJoinMin != null ? state.settings.cardJoinMin : 1;
+    joinMin.onchange = function() {
+      var v = Math.max(1, Math.min(7, parseInt(this.value) || 1));
+      state.settings.cardJoinMin = v;
+      this.value = v;
+      saveState();
+    };
+  }
+  if (joinMax) {
+    joinMax.value = state.settings.cardJoinMax != null ? state.settings.cardJoinMax : 3;
+    joinMax.onchange = function() {
+      var v = Math.max(1, Math.min(7, parseInt(this.value) || 3));
+      state.settings.cardJoinMax = v;
+      this.value = v;
+      saveState();
+    };
+  }
 }
 // ===== 消息统计 =====
 function openStats() {
@@ -4184,8 +4496,9 @@ function checkAutoMessage() {
   if (Math.random() > 0.1) return;
 
   var picked = candidates[Math.floor(Math.random() * candidates.length)];
-  var card = (state.cards && state.cards.length > 0)
-    ? state.cards[Math.floor(Math.random() * state.cards.length)]
+    var usableCards = getUsableCards();
+  var card = usableCards.length > 0
+    ? usableCards[Math.floor(Math.random() * usableCards.length)]
     : null;
   var text = card ? card.text : '……';
 
@@ -6173,3 +6486,177 @@ function closeWelcome() {
   bind();
   setTimeout(bind, 500);
 })();
+
+// ===== 表情包管理页面 =====
+function renderStickerGroups() {
+  var container = document.getElementById('stickerGroupsContainer');
+  if (!container) return;
+  var html = '';
+
+  stickerGroups.forEach(function(g, idx) {
+    var count = (g.items || []).length;
+    var collapsed = g.collapsed || false;
+
+    html += '<div class="sticker-group-card" style="background:var(--card);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:0 2px 10px rgba(0,0,0,0.05);">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+    html += '<div onclick="toggleStickerGroupCollapse(\'' + g.id + '\')" style="flex:1;display:flex;align-items:center;gap:6px;cursor:pointer;">';
+    html += '<span style="font-size:12px;color:var(--gray);transition:transform 0.2s;display:inline-block;' + (collapsed ? 'transform:rotate(-90deg);' : '') + '">▼</span>';
+    html += '<span style="font-size:15px;font-weight:600;color:var(--text);">' + g.name + '（' + count + '）</span>';
+    html += '</div>';
+    html += '<div style="display:flex;gap:4px;align-items:center;">';
+    html += '<span onclick="renameStickerGroup(\'' + g.id + '\')" style="cursor:pointer;font-size:14px;padding:2px 6px;">✎</span>';
+    html += '<span onclick="moveStickerGroup(\'' + g.id + '\',-1)" style="cursor:pointer;font-size:14px;padding:2px 6px;">↑</span>';
+    html += '<span onclick="moveStickerGroup(\'' + g.id + '\',1)" style="cursor:pointer;font-size:14px;padding:2px 6px;">↓</span>';
+    html += '<span onclick="deleteStickerGroup(\'' + g.id + '\')" style="cursor:pointer;font-size:14px;padding:2px 6px;">🗑</span>';
+    html += '</div>';
+    html += '</div>';
+
+    if (!collapsed) {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;margin-bottom:10px;">';
+      (g.items || []).forEach(function(item, itemIdx) {
+        html += '<div style="position:relative;width:60px;height:60px;flex-shrink:0;">';
+        html += '<img src="' + item + '" style="width:60px;height:60px;max-width:60px;max-height:60px;border-radius:8px;object-fit:contain;display:block;background:#f0f0f5;">';
+        html += '<span onclick="deleteStickerFromGroup(\'' + g.id + '\',' + itemIdx + ')" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--red);color:#fff;font-size:14px;text-align:center;line-height:20px;cursor:pointer;z-index:10;">×</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+
+      html += '<button onclick="addStickersToGroup(\'' + g.id + '\')" style="padding:8px 14px;border:1px dashed var(--border);border-radius:10px;background:transparent;color:var(--blue);font-size:13px;cursor:pointer;">+ 添加表情包（最多 20 个）</button>';
+      html += '<input type="file" id="stickerFileInput_' + g.id + '" accept="image/*" multiple style="display:none" onchange="handleStickerGroupUpload(event,\'' + g.id + '\')">';
+    }
+
+    html += '</div>';
+  });
+
+  if (stickerGroups.length === 0) {
+    html = '<div style="text-align:center;color:var(--gray);padding:40px;">还没有分组，点右上角 + 新建</div>';
+  }
+
+  container.innerHTML = html;
+}
+
+function toggleStickerGroupCollapse(groupId) {
+  var g = stickerGroups.find(function(x) { return x.id === groupId; });
+  if (!g) return;
+  g.collapsed = !g.collapsed;
+  saveStickerGroups();
+  renderStickerGroups();
+}
+
+function addStickerGroup() {
+  var name = prompt('新分组名称：');
+  if (!name || !name.trim()) return;
+  var id = 'sg_' + Date.now();
+  stickerGroups.push({ id: id, name: name.trim(), items: [] });
+  saveStickerGroups();
+  renderStickerGroups();
+  showToast('分组已添加');
+}
+
+function renameStickerGroup(groupId) {
+  var g = stickerGroups.find(function(x) { return x.id === groupId; });
+  if (!g) return;
+  var name = prompt('修改分组名称：', g.name);
+  if (name === null) return;
+  if (!name.trim()) return;
+  g.name = name.trim();
+  saveStickerGroups();
+  renderStickerGroups();
+  showToast('已修改');
+}
+
+function moveStickerGroup(groupId, dir) {
+  var idx = stickerGroups.findIndex(function(x) { return x.id === groupId; });
+  if (idx < 0) return;
+  var target = idx + dir;
+  if (target < 0 || target >= stickerGroups.length) return;
+  var tmp = stickerGroups[idx];
+  stickerGroups[idx] = stickerGroups[target];
+  stickerGroups[target] = tmp;
+  saveStickerGroups();
+  renderStickerGroups();
+}
+
+function deleteStickerGroup(groupId) {
+  var g = stickerGroups.find(function(x) { return x.id === groupId; });
+  if (!g) return;
+  if (!confirm('确定删除「' + g.name + '」分组吗？\n\n组内 ' + (g.items || []).length + ' 个表情包会一起删除，不可恢复！')) return;
+  stickerGroups = stickerGroups.filter(function(x) { return x.id !== groupId; });
+  if (stickerGroups.length === 0) {
+    stickerGroups.push({ id: 'default', name: '默认', items: [] });
+  }
+  saveStickerGroups();
+  renderStickerGroups();
+  showToast('分组已删除');
+}
+
+function addStickersToGroup(groupId) {
+  var input = document.getElementById('stickerFileInput_' + groupId);
+  if (input) input.click();
+}
+
+function handleStickerGroupUpload(e, groupId) {
+  var files = e.target.files;
+  if (!files || files.length === 0) return;
+  if (files.length > 20) {
+    showToast('一次最多添加 20 个，已自动取前 20 个');
+  }
+  var totalFiles = Math.min(files.length, 20);
+  var g = stickerGroups.find(function(x) { return x.id === groupId; });
+  if (!g) return;
+
+  showToast('正在处理 ' + totalFiles + ' 张图片...');
+
+  var promises = [];
+  for (var i = 0; i < totalFiles; i++) {
+    promises.push(compressSticker(files[i]));
+  }
+
+  Promise.all(promises).then(function(results) {
+    g.items = (g.items || []).concat(results);
+    saveStickerGroups();
+    renderStickerGroups();
+    showToast('成功添加 ' + results.length + ' 个表情包');
+  }).catch(function(err) {
+    showToast('添加失败：' + err.message);
+  });
+
+  e.target.value = '';
+}
+
+function compressSticker(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var img = new Image();
+      img.onload = function() {
+        var canvas = document.createElement('canvas');
+        var MAX_SIZE = 400;
+        var width = img.width, height = img.height;
+        if (width > height) {
+          if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+        } else {
+          if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.75));
+      };
+      img.onerror = function() { reject(new Error('图片加载失败')); };
+      img.src = ev.target.result;
+    };
+    reader.onerror = function() { reject(new Error('读取失败')); };
+    reader.readAsDataURL(file);
+  });
+}
+
+function deleteStickerFromGroup(groupId, itemIdx) {
+  var g = stickerGroups.find(function(x) { return x.id === groupId; });
+  if (!g) return;
+  g.items.splice(itemIdx, 1);
+  saveStickerGroups();
+  renderStickerGroups();
+  showToast('已删除');
+}
