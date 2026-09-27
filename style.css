@@ -996,3 +996,96 @@ button[onclick="sendChatMsg()"] {
   margin-bottom: 8px;
 }
 #pageHome { position: relative; }
+
+/* ===== 字卡顶部工具栏 ===== */
+.card-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  padding: 8px 0 10px;
+  margin-bottom: 6px;
+}
+.card-toolbar-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.card-toolbar-btn {
+  flex: 1;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--blue);
+  font-size: 13px;
+  cursor: pointer;
+}
+.card-search {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  outline: none;
+  background: var(--card);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.card-search:focus { border-color: var(--blue); }
+.card-count {
+  font-size: 12px;
+  color: var(--gray);
+  margin-bottom: 8px;
+}
+.card-empty {
+  font-size: 13px;
+  color: var(--gray);
+  padding: 24px 0;
+  text-align: center;
+}
+.card-empty-inline {
+  font-size: 12px;
+  color: var(--gray);
+  padding: 4px 0;
+}
+
+/* ===== 分类操作按钮 ===== */
+.cat-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.cat-action {
+  cursor: pointer;
+  font-size: 13px;
+  opacity: 0.7;
+  padding: 2px 4px;
+}
+.cat-action:active { opacity: 1; }
+
+/* ===== 屏蔽样式 ===== */
+.card-item.blocked {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.category-group.blocked .cat-name {
+  opacity: 0.5;
+}
+
+/* ===== 排版紧凑 ===== */
+.category-group {
+  margin-bottom: 10px;
+}
+.category-header {
+  padding: 10px 14px;
+}
+.category-header .cat-name {
+  font-size: 14px;
+}
+.card-item {
+  padding: 8px 10px;
+}
+.card-item-text {
+  font-size: 13px;
+}
