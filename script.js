@@ -6154,6 +6154,28 @@ function closeWelcome() {
 }
 
 // 等页面加载后自动检查
+
+// ===== 修复长按消息菜单：点空白处关闭 =====
+document.addEventListener('click', function(e) {
+  var mask = document.getElementById('msgMenuMask');
+  var menu = document.getElementById('msgMenu');
+  if (!mask || !menu) return;
+  if (menu.style.display === 'none') return;
+  // 如果点的不是菜单本身，就关闭菜单
+  if (!menu.contains(e.target)) {
+    hideMsgMenu();
+  }
+}, true);
+
+document.addEventListener('touchstart', function(e) {
+  var mask = document.getElementById('msgMenuMask');
+  var menu = document.getElementById('msgMenu');
+  if (!mask || !menu) return;
+  if (menu.style.display === 'none') return;
+  if (!menu.contains(e.target)) {
+    hideMsgMenu();
+  }
+}, true);
 window.addEventListener('load', function() {
   setTimeout(showWelcomeIfFirstTime, 300);
 });
