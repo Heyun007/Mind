@@ -7598,8 +7598,8 @@ function confirmWorkPicker() {
   var scene = getWorkScene(sceneId);
   if (!dream || !scene) return;
 
-  // 建议打工：95% 接受
-  var accept = Math.random() < 0.95;
+  // 建议打工：90% 接受
+  var accept = Math.random() < 0.90;
   closeWorkPicker();
 
   if (!accept) {
@@ -7638,13 +7638,13 @@ function confirmWorkPicker() {
     record.lastSettledDate = '';
   record.todaySettledAmount = null;
 
-  // 判断今天是否请假（1%）
-  if (Math.random() < 0.01) {
+  // 判断今天是否请假（5%）
+  if (Math.random() < 0.05) {
     record.hasLeaveToday = true;
     record.todayLog.push({ hour: 0, min: 0, text: '今日请假', type: 'leave' });
   }
-  // 判断今天是否迟到（5%）
-  else if (Math.random() < 0.05) {
+  // 判断今天是否迟到（10%）
+  else if (Math.random() < 0.10) {
     record.hasLateToday = true;
   }
 
@@ -7828,10 +7828,10 @@ function tickWorkSystem() {
       settleDailyWage(w);
     }
 
-    // 5. 每 20 分钟检测事件（只在工作时段内）
+    // 5. 每 5 分钟检测事件（只在工作时段内）
     if (w.isWorking) {
       if (!w.lastEventCheck) w.lastEventCheck = nowTs;
-      if (nowTs - w.lastEventCheck >= 20 * 60 * 1000) {
+      if (nowTs - w.lastEventCheck >= 5 * 60 * 1000) {
         w.lastEventCheck = nowTs;
         triggerWorkEvent(w, scene, now);
       }
