@@ -1,10 +1,13 @@
 // ===== 原生 IndexedDB 初始化（无需任何外部库） =====
 var dbPromise = new Promise(function(resolve, reject) {
-  var req = indexedDB.open('MindAppDB', 1);
+  var req = indexedDB.open('MindAppDB', 2);
   req.onupgradeneeded = function(e) {
     var db = e.target.result;
     if (!db.objectStoreNames.contains('stateStore')) {
       db.createObjectStore('stateStore');
+    }
+    if (!db.objectStoreNames.contains('stickerStore')) {
+      db.createObjectStore('stickerStore');
     }
   };
   req.onsuccess = function(e) { resolve(e.target.result); };
@@ -1022,18 +1025,13 @@ function restoreData(e) {
         if (data.chatMessages) chatMessages = data.chatMessages;
       }
            // 恢复表情包（新结构）
-      if (data.stickerGroups && Array.isArray(data.stickerGroups)) {
-        try {
-          localStorage.setItem('dreamStickerGroups', JSON.stringify(data.stickerGroups));
-          stickerGroups = data.stickerGroups;
-        } catch(e) {}
-      } else if (data.stickers && Array.isArray(data.stickers)) {
-        var oldGroups = [{ id: 'default', name: '默认', items: data.stickers }];
-        try {
-          localStorage.setItem('dreamStickerGroups', JSON.stringify(oldGroups));
-          stickerGroups = oldGroups;
-        } catch(e) {}
-      } 
+if (data.stickerGroups && Array.isArray(data.stickerGroups)) {
+  stickerGroups = data.stickerGroups;
+  saveStickerGroups();
+} else if (data.stickers && Array.isArray(data.stickers)) {
+  stickerGroups = [{ id: 'default', name: '默认', items: data.stickers }];
+  saveStickerGroups();
+}
       // 恢复私聊聊天背景
       if (data.dreamChatBg) {
         localStorage.setItem('dreamChatBg', data.dreamChatBg);
@@ -1415,22 +1413,54 @@ var currentStickerGroupId = 'default';
 
 function loadStickerGroups() {
   var saved = localStorage.getItem('dreamStickerGroups');
+  var groups = null;
   if (saved) {
     try {
       var parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) groups = parsed;
     } catch(e) {}
   }
-  // 迁移旧的 stickers 数组到默认分组
-  var old = [];
-  try { old = JSON.parse(localStorage.getItem('dreamStickers') || '[]'); } catch(e) {}
-  var groups = [{ id: 'default', name: '默认', items: old }];
-  try { localStorage.setItem('dreamStickerGroups', JSON.stringify(groups)); } catch(e) {}
+  if (!groups) {
+    var old = [];
+    try { old = JSON.parse(localStorage.getItem('dreamStickers') || '[]'); } catch(e) {}
+    groups = [{ id: 'default', name: '默认', items: old }];
+  }
+
+  dbPromise.then(function(db) {
+    var tx = db.transaction('stickerStore', 'readonly');
+    var req = tx.objectStore('stickerStore').get('stickerGroups');
+    req.onsuccess = function(e) {
+      var result = e.target.result;
+      if (result) {
+        try {
+          var latest = JSON.parse(result);
+          if (Array.isArray(latest) && latest.length > 0) {
+            stickerGroups = latest;
+            try { renderStickerGroups(); } catch(err) {}
+            try { renderStickers(); } catch(err) {}
+          }
+        } catch(err) {}
+      } else {
+        saveStickerGroups();
+      }
+    };
+  }).catch(function(e) {
+    console.error('读取表情包 IndexedDB 失败', e);
+  });
+
   return groups;
 }
 
 function saveStickerGroups() {
-  try { localStorage.setItem('dreamStickerGroups', JSON.stringify(stickerGroups)); } catch(e) {}
+  var data = JSON.stringify(stickerGroups);
+  dbPromise.then(function(db) {
+    var tx = db.transaction('stickerStore', 'readwrite');
+    tx.objectStore('stickerStore').put(data, 'stickerGroups');
+  }).catch(function(e) {
+    console.error('表情包保存失败', e);
+    showToast('表情包保存失败');
+  });
+  try { localStorage.setItem('dreamStickerGroups', data); } catch(e) {}
 }
 
 function getCurrentStickerGroup() {
