@@ -168,6 +168,18 @@
             <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">📞</div>
             <div style="font-size:11px;color:var(--gray);">通话</div>
           </div>
+                    <div onclick="openRedPacketPanel()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">🧧</div>
+            <div style="font-size:11px;color:var(--gray);">红包</div>
+          </div>
+                    <div onclick="openGiftPanel()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">🎁</div>
+            <div style="font-size:11px;color:var(--gray);">送礼</div>
+          </div>
+                    <div onclick="openAssistantPanel()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">🛠️</div>
+            <div style="font-size:11px;color:var(--gray);">小助手</div>
+          </div>
         </div>
         <input type="file" id="imageMessageInput" accept="image/*" style="display:none" onchange="sendImageMessage(event)">
       </div>
@@ -346,6 +358,30 @@
   </div>
   <div class="page-body" style="padding:0;">
     <div id="stickerGroupsContainer" style="padding:12px 16px;"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Music ===== -->
+<div class="page" id="pageMusic">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>音乐</h2>
+    <button onclick="openMusicImport()" style="width:32px;height:32px;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--blue);display:flex;align-items:center;justify-content:center;">+</button>
+  </div>
+  <div class="page-body" style="padding:0;">
+    <div id="musicListContainer"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Work ===== -->
+<div class="page" id="pageWork">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>打工</h2>
+    <button onclick="openWorkPicker()" style="width:32px;height:32px;border:none;background:transparent;font-size:22px;cursor:pointer;color:var(--blue);display:flex;align-items:center;justify-content:center;">+</button>
+  </div>
+  <div class="page-body" style="padding:12px 16px;">
+    <div id="workCardsContainer"></div>
   </div>
 </div>
 
@@ -782,6 +818,62 @@
   <div id="anniPanelContent"></div>
 </div>
 
+<!-- ===== 音乐悬浮球 ===== -->
+<div id="musicBall" style="display:none;position:absolute;bottom:20px;right:20px;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,0.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.7);box-shadow:0 6px 20px rgba(0,0,0,0.15);z-index:900;cursor:pointer;align-items:center;justify-content:center;font-size:18px;user-select:none;touch-action:none;">
+  <span id="musicBallIcon">🎵</span>
+  <div id="musicBallProgress" style="position:absolute;bottom:-3px;left:10%;width:80%;height:3px;border-radius:2px;background:rgba(0,0,0,0.1);overflow:hidden;">
+    <div id="musicBallProgressInner" style="height:100%;width:0%;background:#007aff;transition:width 0.2s;"></div>
+  </div>
+</div>
+
+<!-- ===== 音乐播放面板 ===== -->
+<div id="musicPanel" style="display:none;position:absolute;bottom:0;left:0;width:100%;background:rgba(250,250,252,0.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.6);padding:12px 16px 16px;z-index:901;box-sizing:border-box;border-radius:20px 20px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,0.08);">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+    <div style="flex:1;min-width:0;">
+      <div id="musicBarTitle" style="font-size:14px;font-weight:600;color:#1d1d1f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">未播放</div>
+      <div id="musicBarArtist" style="font-size:11px;color:#86868b;margin-top:1px;">—</div>
+    </div>
+    <button onclick="collapseMusicPanel()" style="width:28px;height:28px;border:none;background:rgba(0,0,0,0.05);border-radius:50%;font-size:14px;color:#555;cursor:pointer;padding:0;">▼</button>
+    <button onclick="stopMusic()" style="width:28px;height:28px;border:none;background:rgba(0,0,0,0.05);border-radius:50%;font-size:14px;color:#555;cursor:pointer;padding:0;">✕</button>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+    <span id="musicBarCurrent" style="font-size:10px;color:#86868b;width:32px;text-align:right;">0:00</span>
+    <input id="musicBarProgress" type="range" min="0" max="100" value="0" style="flex:1;height:4px;outline:none;-webkit-appearance:none;appearance:none;background:rgba(0,0,0,0.1);border-radius:2px;">
+    <span id="musicBarDuration" style="font-size:10px;color:#86868b;width:32px;">0:00</span>
+  </div>
+
+  <div style="display:flex;justify-content:center;align-items:center;gap:26px;">
+    <button onclick="prevMusic()" style="width:32px;height:32px;border:none;background:transparent;font-size:20px;cursor:pointer;padding:0;color:#1d1d1f;">⏮</button>
+    <button id="musicBarPlayBtn" onclick="togglePlayMusic()" style="width:44px;height:44px;border:none;background:#007aff;color:#fff;border-radius:50%;font-size:16px;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,122,255,0.35);">▶</button>
+    <button onclick="nextMusic()" style="width:32px;height:32px;border:none;background:transparent;font-size:20px;cursor:pointer;padding:0;color:#1d1d1f;">⏭</button>
+  </div>
+</div>
+
+<style>
+#musicBarProgress::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #007aff;
+  cursor: pointer;
+}
+#musicBarProgress::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #007aff;
+  cursor: pointer;
+  border: none;
+}
+#musicBall.dragging {
+  opacity: 0.85;
+  transform: scale(1.1);
+}
+</style>
+
 <!-- Toast -->
  <div id="addCardModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:900;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
   <div style="background:#fff;border-radius:16px;padding:20px;width:100%;max-width:360px;box-sizing:border-box;">
@@ -797,6 +889,182 @@
       <button onclick="closeAddCardModal()" style="flex:1;padding:10px;border:1px solid #e5e5ea;background:transparent;border-radius:10px;font-size:14px;cursor:pointer;color:#1d1d1f;">取消</button>
       <button onclick="confirmAddCard()" style="flex:1;padding:10px;border:none;background:#007aff;color:#fff;border-radius:10px;font-size:14px;cursor:pointer;">添加</button>
     </div>
+  </div>
+</div>
+<!-- ===== 打工：遇到客人弹窗 ===== -->
+<div id="workCustomerModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:9999;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:20px;padding:26px 22px;width:100%;max-width:340px;box-sizing:border-box;text-align:center;">
+    <div id="wcTitle" style="font-size:16px;font-weight:700;color:#1d1d1f;margin-bottom:12px;">⚠️ 遇到麻烦了</div>
+    <div id="wcBody" style="font-size:14px;color:#555;line-height:1.7;margin-bottom:22px;">梦角在工作时遇到了胡搅蛮缠的客人，请求你的帮助</div>
+    <div id="wcSpin" style="display:none;padding:10px 0 20px;">
+      <div style="width:36px;height:36px;border:3px solid #e5e5ea;border-top-color:#007aff;border-radius:50%;margin:0 auto;animation:wspin 0.8s linear infinite;"></div>
+      <div style="font-size:13px;color:#86868b;margin-top:14px;">正在努力与客人争辩中……</div>
+    </div>
+    <div id="wcBtns" style="display:flex;gap:10px;">
+      <button onclick="workCustomerIgnore()" style="flex:1;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">忽略</button>
+      <button onclick="workCustomerHelp()" style="flex:1;padding:11px;border:none;background:#fa5151;color:#fff;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;">帮助</button>
+    </div>
+    <button id="wcConfirm" onclick="workCustomerConfirm()" style="display:none;width:100%;padding:11px;border:none;background:#007aff;color:#fff;border-radius:12px;font-size:14px;cursor:pointer;">确认</button>
+  </div>
+</div>
+
+<style>
+@keyframes wspin { to { transform: rotate(360deg); } }
+</style>
+<!-- ===== 小助手主弹窗 ===== -->
+<div id="assistantModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:950;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:18px;padding:20px;width:100%;max-width:340px;box-sizing:border-box;">
+    <div style="font-size:16px;font-weight:700;text-align:center;color:#1d1d1f;margin-bottom:16px;">🛠️ 小助手</div>
+
+    <div onclick="openReportPanel()" style="display:flex;align-items:center;gap:12px;padding:14px 16px;margin-bottom:10px;background:#f8f8fa;border-radius:12px;cursor:pointer;">
+      <div style="font-size:24px;">🚨</div>
+      <div style="flex:1;">
+        <div style="font-size:14px;font-weight:600;color:#1d1d1f;">举报顶号</div>
+        <div style="font-size:11px;color:#86868b;margin-top:2px;">举报后会封禁顶号者 5 分钟</div>
+      </div>
+      <div style="color:#86868b;">›</div>
+    </div>
+
+    <div onclick="openCheatPanel()" style="display:flex;align-items:center;gap:12px;padding:14px 16px;margin-bottom:16px;background:#f8f8fa;border-radius:12px;cursor:pointer;">
+      <div style="font-size:24px;">⚡</div>
+      <div style="flex:1;">
+        <div style="font-size:14px;font-weight:600;color:#1d1d1f;">外挂</div>
+        <div style="font-size:11px;color:#86868b;margin-top:2px;">解除禁言 / 夺回群主</div>
+      </div>
+      <div style="color:#86868b;">›</div>
+    </div>
+
+    <button onclick="closeAssistantModal()" style="width:100%;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">关闭</button>
+  </div>
+</div>
+
+<!-- ===== 举报顶号子面板 ===== -->
+<div id="reportModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:960;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:18px;padding:20px;width:100%;max-width:340px;box-sizing:border-box;">
+    <div style="font-size:16px;font-weight:700;text-align:center;color:#1d1d1f;margin-bottom:16px;">🚨 举报顶号</div>
+
+    <div style="font-size:13px;color:#86868b;margin-bottom:6px;">顶号的是谁</div>
+    <select id="reportTopSelect" style="width:100%;padding:10px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;background:#fff;outline:none;box-sizing:border-box;margin-bottom:14px;"></select>
+
+    <div style="font-size:13px;color:#86868b;margin-bottom:6px;">被顶号的是谁</div>
+    <select id="reportVictimSelect" style="width:100%;padding:10px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;background:#fff;outline:none;box-sizing:border-box;margin-bottom:16px;"></select>
+
+    <div style="display:flex;gap:8px;">
+      <button onclick="closeReportPanel()" style="flex:1;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">取消</button>
+      <button onclick="submitReport()" style="flex:1;padding:11px;border:none;background:#fa5151;color:#fff;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;">举报</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 外挂子面板 ===== -->
+<div id="cheatModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:960;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:18px;padding:20px;width:100%;max-width:340px;box-sizing:border-box;">
+    <div style="font-size:16px;font-weight:700;text-align:center;color:#1d1d1f;margin-bottom:16px;">⚡ 外挂</div>
+
+    <div onclick="cheatUnbanSelf()" style="display:flex;align-items:center;gap:12px;padding:14px 16px;margin-bottom:10px;background:#f8f8fa;border-radius:12px;cursor:pointer;">
+      <div style="font-size:22px;">🔓</div>
+      <div style="flex:1;">
+        <div style="font-size:14px;font-weight:600;color:#1d1d1f;">强制解除禁言</div>
+        <div id="cheatUnbanHint" style="font-size:11px;color:#86868b;margin-top:2px;">每天一次</div>
+      </div>
+    </div>
+
+    <div onclick="cheatSeizeOwner()" style="display:flex;align-items:center;gap:12px;padding:14px 16px;margin-bottom:16px;background:#f8f8fa;border-radius:12px;cursor:pointer;">
+      <div style="font-size:22px;">👑</div>
+      <div style="flex:1;">
+        <div style="font-size:14px;font-weight:600;color:#1d1d1f;">强制夺回群主</div>
+        <div id="cheatSeizeHint" style="font-size:11px;color:#86868b;margin-top:2px;">每天一次</div>
+      </div>
+    </div>
+
+    <button onclick="closeCheatPanel()" style="width:100%;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">关闭</button>
+  </div>
+</div>
+<!-- ===== 打工建议弹窗 ===== -->
+<div id="workPickerModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:950;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:18px;padding:20px;width:100%;max-width:340px;box-sizing:border-box;max-height:80vh;display:flex;flex-direction:column;">
+    <div style="font-size:16px;font-weight:700;text-align:center;color:#1d1d1f;margin-bottom:16px;">💼 建议打工</div>
+
+    <div style="font-size:13px;color:#86868b;margin-bottom:6px;">选择梦角</div>
+    <select id="workDreamSelect" style="width:100%;padding:10px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;background:#fff;outline:none;box-sizing:border-box;margin-bottom:14px;"></select>
+
+    <div style="font-size:13px;color:#86868b;margin-bottom:6px;">选择工作</div>
+    <div id="workSceneList" style="overflow-y:auto;max-height:300px;margin-bottom:14px;"></div>
+
+    <div style="display:flex;gap:8px;">
+      <button onclick="closeWorkPicker()" style="flex:1;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">取消</button>
+      <button onclick="confirmWorkPicker()" style="flex:1;padding:11px;border:none;background:#007aff;color:#fff;border-radius:12px;font-size:14px;cursor:pointer;">确定</button>
+    </div>
+  </div>
+</div>
+<!-- ===== 送礼面板 ===== -->
+<div id="giftPanel" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:950;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:18px;padding:20px;width:100%;max-width:340px;box-sizing:border-box;max-height:80vh;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div style="font-size:16px;font-weight:700;color:#1d1d1f;">🎁 送礼</div>
+      <button id="giftEditBtn" onclick="toggleGiftEditMode()" style="font-size:13px;padding:4px 12px;border-radius:12px;border:1px solid #e5e5ea;background:#fff;color:#007aff;cursor:pointer;">编辑</button>
+    </div>
+    <div id="giftListContainer" style="overflow-y:auto;flex:1;min-height:100px;"></div>
+    <button onclick="closeGiftPanel()" style="margin-top:14px;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">取消</button>
+  </div>
+</div>
+<!-- ===== 红包面板 ===== -->
+<div id="redPacketPanel" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:950;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:18px;padding:22px;width:100%;max-width:340px;box-sizing:border-box;">
+    <div style="font-size:16px;font-weight:700;text-align:center;color:#d6336c;margin-bottom:16px;">🧧 红包</div>
+
+    <div id="rpBalanceSection" style="text-align:center;margin-bottom:18px;">
+      <div style="font-size:12px;color:#86868b;margin-bottom:4px;">TA 的小金库</div>
+      <div id="rpBalanceNum" style="font-size:28px;font-weight:700;color:#1d1d1f;">0.00</div>
+      <button onclick="openTopupDialog()" style="margin-top:10px;padding:6px 18px;border:none;border-radius:16px;background:#f0f0f5;color:#007aff;font-size:13px;cursor:pointer;">充值</button>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <label style="font-size:13px;color:#86868b;display:block;margin-bottom:4px;">金额</label>
+      <input type="number" id="rpAmount" placeholder="0.00" step="0.01" min="0.01" max="99999999" style="width:100%;padding:10px 14px;border:1px solid #e5e5ea;border-radius:12px;font-size:15px;outline:none;box-sizing:border-box;">
+    </div>
+
+    <div id="rpPeopleRow" style="margin-bottom:12px;display:none;">
+      <label style="font-size:13px;color:#86868b;display:block;margin-bottom:4px;">几人红包</label>
+      <input type="number" id="rpPeople" placeholder="1" min="1" value="1" style="width:100%;padding:10px 14px;border:1px solid #e5e5ea;border-radius:12px;font-size:15px;outline:none;box-sizing:border-box;">
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <label style="font-size:13px;color:#86868b;display:block;margin-bottom:4px;">一句话（可选）</label>
+      <input type="text" id="rpMessage" placeholder="大吉大利，恭喜发财" style="width:100%;padding:10px 14px;border:1px solid #e5e5ea;border-radius:12px;font-size:15px;outline:none;box-sizing:border-box;">
+    </div>
+
+    <div style="display:flex;gap:8px;">
+      <button onclick="closeRedPacketPanel()" style="flex:1;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">取消</button>
+      <button onclick="sendRedPacket()" style="flex:1;padding:11px;border:none;background:#fa5151;color:#fff;border-radius:12px;font-size:14px;cursor:pointer;font-weight:600;">发红包</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 礼物详情弹窗 ===== -->
+<div id="giftDetail" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:960;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:18px;padding:0;width:100%;max-width:340px;overflow:hidden;box-sizing:border-box;">
+    <div style="background:linear-gradient(180deg,#f5f5f7,#e8e8ed);padding:26px 20px;text-align:center;position:relative;">
+      <div style="font-size:13px;color:#555;" id="gdSender">来自 XXX 的礼物</div>
+      <div style="font-size:40px;margin-top:10px;" id="gdEmoji">🎁</div>
+      <div style="font-size:18px;font-weight:700;margin-top:8px;color:#1d1d1f;" id="gdName">蛋糕 ×1</div>
+      <div style="font-size:13px;color:#fa5151;margin-top:6px;font-weight:600;" id="gdPrice">5.00 元</div>
+      <span onclick="closeGiftDetail()" style="position:absolute;top:12px;right:14px;font-size:20px;cursor:pointer;color:#999;">×</span>
+    </div>
+    <div id="gdActionArea" style="padding:16px 20px;"></div>
+  </div>
+</div>
+
+<!-- ===== 领红包弹窗 ===== -->
+<div id="redPacketDetail" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:960;justify-content:center;align-items:center;padding:20px;box-sizing:border-box;">
+  <div style="background:#fff;border-radius:18px;padding:0;width:100%;max-width:340px;overflow:hidden;box-sizing:border-box;">
+    <div style="background:linear-gradient(180deg,#fa5151,#d13333);padding:24px 20px;text-align:center;color:#fff;position:relative;">
+      <div style="font-size:13px;opacity:0.85;" id="rpdSender">来自 XXX 的红包</div>
+      <div style="font-size:36px;font-weight:700;margin-top:8px;" id="rpdAmount">0.00</div>
+      <div style="font-size:12px;opacity:0.85;margin-top:6px;" id="rpdMessage">大吉大利，恭喜发财</div>
+      <span onclick="closeRedPacketDetail()" style="position:absolute;top:12px;right:14px;font-size:20px;cursor:pointer;opacity:0.8;">×</span>
+    </div>
+    <div id="rpdClaimList" style="padding:16px 20px;max-height:240px;overflow-y:auto;"></div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
