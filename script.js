@@ -7632,7 +7632,7 @@ function confirmWorkPicker() {
   };
 
   // 初始心情值：60%~100%
-  record.mood = 60 + Math.floor(Math.random() * 41);
+  record.mood = 40 + Math.floor(Math.random() * 61);
   record.todayDate = todayStr;
   record.lastEventCheck = Date.now();
     record.lastSettledDate = '';
@@ -8120,7 +8120,7 @@ function dailyResetWork(w, todayStr) {
   w.lastEventCheck = Date.now();
 
   // 心情值刷新到 60%~100%
-  w.mood = 60 + Math.floor(Math.random() * 41);
+  w.mood = 40 + Math.floor(Math.random() * 61);
 
   // 判断今天是否请假（1%）
   if (Math.random() < 0.01) {
