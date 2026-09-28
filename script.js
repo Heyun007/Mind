@@ -54,6 +54,15 @@ let state = {
     appPages: null,
    diaries: [],
   userDiaryLastDate: '',
+    giftItems: null,
+      workShifts: [],   // 所有梦角的打工记录
+        bannedDreams: [],         // 被封禁的梦角 [{ dreamId, until }]
+  apologizingDreams: [],    // 强制道歉的梦角 [{ dreamId, until }]
+  cheatUsage: { date: '', unbanGroups: [], seizeGroups: [] },  // 外挂使用记录
+    musicLibrary: {
+    songs: [],      // 所有导入的歌曲
+    playlists: []   // 用户创建的播放列表
+  },
 };
 
 // ===== 图标配置 =====
@@ -71,6 +80,8 @@ const ICONS_CONFIG = [
   { key: 'pageCompanion', name: '陪伴', emoji: '🐾', color: 'icon-blue' },
   { key: 'pageMailbox', name: '信箱', emoji: '✉️', color: 'icon-blue' },
   { key: 'pageStickers', name: '表情包', emoji: '😀', color: 'icon-blue' },
+  { key: 'pageWork', name: '打工', emoji: '💼', color: 'icon-orange' },
+  { key: 'pageMusic', name: '音乐', emoji: '🎵', color: 'icon-purple' },
 ];
 
 // ===== 1. 渲染主页图标 =====
@@ -233,6 +244,17 @@ function renderIconSettings() {
 // ===== INIT =====
 async function init() {
   await loadState(); 
+    // 给所有梦角补上 balance 字段
+  if (state.dreams && Array.isArray(state.dreams)) {
+      if (!state.giftItems || !Array.isArray(state.giftItems) || state.giftItems.length === 0) {
+    state.giftItems = [
+      { id: 'gift_1', name: '蛋糕', price: 5 },
+      { id: 'gift_2', name: '花',   price: 10 },
+      { id: 'gift_3', name: '奶茶', price: 15 }
+    ];
+  }
+    state.dreams.forEach(function(d) { if (d.balance == null) d.balance = 0; });
+  }
   loadChatMessages();
   renderChatMessages();
   renderAll();
@@ -252,6 +274,11 @@ async function init() {
   applyHomeBg();
     checkMailDelivery();
   setInterval(checkMailDelivery, 30000);
+    checkRedPacketExpiry();
+  setInterval(checkRedPacketExpiry, 5 * 60 * 1000);
+    startWorkSystem();
+      checkAssistantExpiry();
+  setInterval(checkAssistantExpiry, 30000);
 }
 
 // ===== PERSISTENCE =====
@@ -311,6 +338,12 @@ function loadState() {
             if (parsed.compSelectedDreamId) state.compSelectedDreamId = parsed.compSelectedDreamId;
             if (parsed.userDiaryLastDate) state.userDiaryLastDate = parsed.userDiaryLastDate;
             if (parsed.appPages) state.appPages = parsed.appPages;
+            if (parsed.workShifts) state.workShifts = parsed.workShifts;
+            if (parsed.bannedDreams) state.bannedDreams = parsed.bannedDreams;
+            if (parsed.apologizingDreams) state.apologizingDreams = parsed.apologizingDreams;
+            if (parsed.cheatUsage) state.cheatUsage = parsed.cheatUsage;
+            if (parsed.musicLibrary) state.musicLibrary = parsed.musicLibrary;
+            if (parsed.giftItems) state.giftItems = parsed.giftItems;
           } catch(err) {}
         }
         resolve();
@@ -372,6 +405,8 @@ function navigateTo(pageId) {
   try {
     if (pageId === 'pageWordCards') renderWordCards();
     if (pageId === 'pageStickers') renderStickerGroups();
+    if (pageId === 'pageWork') renderWorkCards();
+    if (pageId === 'pageMusic') renderMusicList();
     if (pageId === 'pageCallHistory') renderCallHistory();
     if (pageId === 'pageCheckinHistory') renderCheckinHistory();
     if (pageId === 'pageProfile') loadProfileForm();
@@ -429,6 +464,7 @@ function renderDreamRoles() {
   if (!state.dreams || state.dreams.length === 0) {
     if (state.dream) {
       state.dreams = [Object.assign({ id: 'dream_1' }, state.dream)];
+            if (state.dreams[0].balance == null) state.dreams[0].balance = 0;
     } else {
       state.dreams = [{ id: 'dream_1', name: '沈屿', gender: '男', avatar: '' }];
     }
@@ -453,7 +489,7 @@ function renderDreamRoles() {
 // 新增梦角
 function addDreamRole() {
   var newId = 'dream_' + Date.now();
-  state.dreams.push({ id: newId, name: '新梦角', gender: '男', avatar: '' });
+    state.dreams.push({ id: newId, name: '新梦角', gender: '男', avatar: '', balance: 0 });
   saveState();
   renderDreamRoles();
   openEditDreamRole(newId);
@@ -521,6 +557,7 @@ function saveDreamRole() {
   if (!d) return;
   
   d.name = document.getElementById('dreamName').value || '未命名';
+    if (d.balance == null) d.balance = 0;
   d.gender = document.getElementById('dreamGender').value || '男';
   
   // 【重要兼容补丁】：把当前编辑的梦角，同步给旧的 state.dream，防止聊天功能报错
@@ -1600,6 +1637,7 @@ if (Math.random() < 0.05) {
   }
   
   // 决定发字卡还是表情包
+  var stickers = getAllStickers().map(function(x) { return x.data; });
 var hasCards = cards.length > 0;
 var hasStickers = stickers.length > 0;
 if (hasCards && hasStickers) {
@@ -1660,6 +1698,105 @@ if (_lastMsg && _lastMsg.from === 'dream' && Math.random() < 0.03) {
   }, 3000 + Math.random() * 4000);
 }
   
+  // ===== 梦角主动发红包（5% 概率） =====
+  if (Math.random() < 0.05) {
+    var rpSenderId = isGroup ? senderId : state.currentChatId;
+    if (rpSenderId) {
+      var rpSender = state.dreams.find(function(d) { return d.id === rpSenderId; });
+      if (rpSender) {
+        var balance = getDreamBalance(rpSenderId);
+        if (balance < 0.01) {
+          chatMessages.push({ from: 'system', text: '「' + rpSender.name + '」的零花钱已花完，希望你为他充值', time: Date.now() });
+        } else {
+          var amt = 0.01 + Math.random() * (balance - 0.01);
+          amt = Math.floor(amt * 100) / 100;
+          if (amt < 0.01) amt = 0.01;
+          if (amt > balance) amt = balance;
+          setDreamBalance(rpSenderId, balance - amt);
+
+          var usableForRp = getUsableCards();
+          var rpMsg = usableForRp.length > 0 ? usableForRp[Math.floor(Math.random() * usableForRp.length)].text : '大吉大利，恭喜发财';
+
+          var rpMaxPeople = 1;
+          if (isGroup) {
+            var rpGroup = state.groups.find(function(x) { return x.id === state.currentChatId; });
+            var groupSize = rpGroup ? (rpGroup.memberIds.length + 1) : 2;
+            rpMaxPeople = 1 + Math.floor(Math.random() * groupSize);
+          }
+
+          var rpPacket = {
+            from: 'dream',
+            senderId: rpSenderId,
+            senderName: rpSender.name,
+            type: 'redpacket',
+            packetId: 'rp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+            totalAmount: amt,
+            message: rpMsg,
+            maxPeople: rpMaxPeople,
+            claimed: [],
+            refunded: false,
+            chatId: state.currentChatId,
+            time: Date.now()
+          };
+          chatMessages.push(rpPacket);
+
+          if (isGroup) {
+            var rpGroup2 = state.groups.find(function(x) { return x.id === state.currentChatId; });
+            if (rpGroup2) {
+              var rpCandidates = rpGroup2.memberIds.filter(function(id) { return id !== rpSenderId; });
+              rpCandidates.forEach(function(id) {
+                if (Math.random() < 0.6) {
+                  setTimeout(function() {
+                    claimRedPacket(rpPacket.packetId, id);
+                  }, 1500 + Math.random() * 5000);
+                }
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+   // ===== 梦角主动送礼物（5% 概率） =====
+  if (Math.random() < 0.05) {
+    var giftSenderId = isGroup ? senderId : state.currentChatId;
+    if (giftSenderId) {
+      var giftSender = state.dreams.find(function(d) { return d.id === giftSenderId; });
+      if (giftSender) {
+        var giftBalance = getDreamBalance(giftSenderId);
+        var giftList = getGiftItems();
+        if (giftList.length > 0) {
+          var pickedGift = giftList[Math.floor(Math.random() * giftList.length)];
+          var count = 1 + Math.floor(Math.random() * 3);
+          var totalCost = Math.floor(pickedGift.price * count * 100) / 100;
+
+          if (giftBalance < totalCost) {
+            chatMessages.push({ from: 'system', text: '「' + giftSender.name + '」的零花钱不够买礼物了，希望你为他充值', time: Date.now() });
+          } else {
+            setDreamBalance(giftSenderId, giftBalance - totalCost);
+            var giftPacket = {
+              from: 'dream',
+              senderId: giftSenderId,
+              senderName: giftSender.name,
+              type: 'gift',
+              packetId: 'gf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+              giftName: pickedGift.name,
+              unitPrice: pickedGift.price,
+              count: count,
+              totalPrice: totalCost,
+              claimed: [],
+              refunded: false,
+              chatId: state.currentChatId,
+              time: Date.now()
+            };
+            chatMessages.push(giftPacket);
+          }
+        }
+      }
+    }
+  } 
+
   renderChatMessages();
 saveChatMessages();
 // 【修复】：找到真正的发件人名字
@@ -1799,142 +1936,6 @@ function renderChat() {
   renderChatMessages(); // 
 } // 
 
-function renderChatMessages() {
-  if (!chatMessages || !Array.isArray(chatMessages)) chatMessages = [];
-  chatMessages = chatMessages.filter(function(m) { return m && m.from !== undefined; });
-
-  var container = document.getElementById('chatMessages');
-  if (!container) return;
-  if (chatMessages.length === 0) {
-    container.innerHTML = '<div style="padding:40px 20px;text-align:center;color:#86868b;font-size:14px;">开始和梦角聊天吧</div>';
-    return;
-  }
-  var html = '';
-  var currentStyle = chatSettings.bubbleStyle || 'default';
-  var styleClass = 'bubble-' + currentStyle;
-  var useInlineStyle = (currentStyle === 'default');
-  var isGroup = state.currentChatId && state.currentChatId.startsWith('group_');
-
-  for (var i = 0; i < chatMessages.length; i++) {
-    var m = chatMessages[i];
-    if (!m || !m.from) continue;
-
-    var time = new Date(m.time);
-    var h = time.getHours();
-    var min = time.getMinutes();
-    if (h < 10) h = '0' + h;
-    if (min < 10) min = '0' + min;
-    var timeStr = h + ':' + min;
-
-    if (m.from === 'system') {
-      html += '<div style="text-align:center;margin:12px 0;font-size:12px;color:#86868b;">' + m.text + '</div>';
-      continue; 
-    }
-
-    if (m.type === 'poke') {
-      var pokeSenderName = m.senderName || (m.from === 'user' ? '我' : '梦角');
-      if (!m.senderName && m.senderId) {
-        var findMember = state.dreams.find(function(d){ return d.id === m.senderId; });
-        if (findMember) pokeSenderName = findMember.name;
-      }
-      html += '<div style="text-align:center;margin:10px 0;font-size:12px;color:#86868b;">';
-      html += '<span style="font-weight:600;color:#555;">' + pokeSenderName + '</span> ' + m.text;
-      html += '</div>';
-      continue; 
-    }
-
-    var imgSrc = '';
-    if (m.type === 'image') {
-      imgSrc = m.imageData;
-    } else if (m.stickerData) {
-      imgSrc = m.stickerData; 
-    } else if (m.stickerIdx !== undefined && stickers[m.stickerIdx]) {
-      imgSrc = stickers[m.stickerIdx]; 
-    } else if (m.sticker) {
-      imgSrc = m.sticker; 
-    }
-
-    var userBg = useInlineStyle ? 'background:' + chatSettings.bubbleUser + ';' : '';
-    var dreamBg = useInlineStyle ? 'background:' + chatSettings.bubbleDream + ';' : '';
-    var textColor = useInlineStyle ? 'color:' + chatSettings.fontColor + ';' : '';
-
-    if (m.from === 'user') {
-      html += '<div style="display:flex;justify-content:flex-end;align-items:flex-end;gap:8px;margin-bottom:6px;">';
-      html += '<div style="max-width:70%;">';
-      
-      // 【核心修改】：改成了 message user bubble，去掉了内联的 font-size
-      var bubbleClass = 'message user bubble chat-bubble user bubble-user ' + styleClass;
-            var quoteHtml = '';
-      if (m.quote) {
-        quoteHtml = '<div style="font-size:11px;opacity:0.7;padding:4px 8px;margin-bottom:4px;background:rgba(0,0,0,0.06);border-left:2px solid #999;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;">' + m.quote.senderName + '：' + m.quote.text + '</div>';
-      }
-      if (imgSrc) {
-        html += '<div class="' + bubbleClass + '" style="' + userBg + textColor + 'padding:4px;">' + quoteHtml + '<img src="' + imgSrc + '" style="max-width:120px;max-height:180px;border-radius:6px;object-fit:contain;display:block;"></div>';
-      } else {
-        html += '<div class="' + bubbleClass + '" style="' + userBg + textColor + '">' + quoteHtml + m.text + '</div>';
-      }
-      var statusText = m.status === 'read' ? '已读' : '未读';
-      html += '<span style="font-size:9px;color:#b0b0b0;display:block;text-align:right;margin-top:2px;">' + statusText + ' &nbsp; ' + timeStr + '</span>';
-      html += '</div>';
-      var userAvatar = state.profile.avatar || '';
-      html += '<img src="' + userAvatar + '" style="width:32px;height:32px;border-radius:50%;flex-shrink:0;object-fit:cover;">';
-      html += '</div>';
-    } else {
-      var displayAvatar = '';
-      var senderName = '';
-      if (isGroup) {
-        if (m.senderId) {
-          var member = state.dreams.find(function(item) { return item.id === m.senderId; });
-          if (member) { senderName = member.name; displayAvatar = member.avatar || ''; }
-        }
-        if (!senderName) senderName = '未知成员';
-        if (!displayAvatar) displayAvatar = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2732%27 height=%2732%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2716%27 fill=%27%23eee%27/%3E%3Ctext x=%2716%27 y=%2720%27 text-anchor=%27middle%27 fill=%27%23aaa%27 font-size=%2712%27%3E?%3C/text%3E%3C/svg%3E';
-      } else {
-        var d = state.dreams.find(function(item) { return item.id === state.currentChatId; });
-        if (d) { senderName = d.name; displayAvatar = d.avatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2732%27 height=%2732%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2716%27 fill=%27%23ffe0e8%27/%3E%3Ctext x=%2716%27 y=%2720%27 text-anchor=%27middle%27 fill=%27%23d6336c%27 font-size=%2712%27%3E💜%3C/text%3E%3C/svg%3E'; }
-      }
-
-      html += '<div style="display:flex;justify-content:flex-start;align-items:flex-end;gap:8px;margin-bottom:6px;">';
-      html += '<img src="' + displayAvatar + '" style="width:32px;height:32px;border-radius:50%;flex-shrink:0;object-fit:cover;">';
-      html += '<div style="max-width:70%;">';
-      if (isGroup && senderName) html += '<span style="font-size:9px;color:#b0b0b0;display:block;margin-bottom:2px;">' + senderName + '</span>';
-      
-      // 【核心修改】：改成了 message yume bubble，去掉了内联的 font-size
-     var bubbleClass = 'message yume bubble chat-bubble dream bubble-dream ' + styleClass;
-           var quoteHtml = '';
-      if (m.quote) {
-        quoteHtml = '<div style="font-size:11px;opacity:0.7;padding:4px 8px;margin-bottom:4px;background:rgba(0,0,0,0.06);border-left:2px solid #999;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;">' + m.quote.senderName + '：' + m.quote.text + '</div>';
-      }
-      if (imgSrc) {
-        html += '<div class="' + bubbleClass + '" style="' + dreamBg + textColor + 'padding:4px;">' + quoteHtml + '<img src="' + imgSrc + '" style="max-width:120px;max-height:180px;border-radius:6px;object-fit:contain;display:block;"></div>';
-      } else {
-        html += '<div class="' + bubbleClass + '" style="' + dreamBg + textColor + '">' + quoteHtml + m.text + '</div>';
-      }
-      html += '<span style="font-size:9px;color:#b0b0b0;display:block;margin-top:2px;">' + timeStr + '</span>';
-      html += '</div>';
-      html += '</div>';
-    }
-  }
-    // ===== 检查当前群聊是否有正在进行的通话，且用户不在里面 =====
-  var activeCallInGroup = null;
-  if (state.currentChatId && state.currentChatId.startsWith('group_') && state.activeCalls) {
-    activeCallInGroup = state.activeCalls.find(function(c) {
-      return c.chatId === state.currentChatId &&
-             c.participants.indexOf('user') === -1 &&
-             c.invited && c.invited.indexOf('user') > -1;
-    });
-  }
-  if (activeCallInGroup) {
-    var callerNames = activeCallInGroup.participants.map(function(id) { return getDreamName(id); }).join('、');
-    html = '<div style="text-align:center;margin:12px 0;font-size:12px;color:#86868b;">📞 ' + callerNames + ' 正在通话中</div>' +
-           '<div style="text-align:center;margin-bottom:12px;"><button onclick="joinActiveCall(\'' + activeCallInGroup.id + '\')" style="padding:6px 18px;border:none;border-radius:16px;background:var(--blue);color:#fff;font-size:13px;cursor:pointer;">点击加入通话</button></div>' + html;
-  }
-  // ========================================================
-  container.innerHTML = html;
-  container.innerHTML = html;
-  container.scrollTop = container.scrollHeight;
-}
-
 function loadChatSettings() {
   try {
     var saved = localStorage.getItem('dreamChatSettings');
@@ -2040,13 +2041,6 @@ function toggleStickerPanel() {
   } else {
     panel.style.display = 'none';
   }
-}
-
-// 新增一个全局变量，用来记录是否处于编辑模式
-
-function toggleStickerEditMode() {
-  isEditingStickers = !isEditingStickers;
-  renderStickers();
 }
 
 // ===== 表情包功能完整版 =====
@@ -2559,6 +2553,13 @@ function renderChatMessages() {
       html += '</div></div>';
       continue;
     }
+        if (m.type === 'report_notice') {
+      var lines = (m.text || '').split('\n');
+      html += '<div style="margin:14px 0;padding:12px 14px;background:rgba(250,81,81,0.08);border:1px solid rgba(250,81,81,0.3);border-radius:12px;font-size:12px;color:#c0392b;line-height:1.7;white-space:pre-wrap;">';
+      html += lines.join('<br>');
+      html += '</div>';
+      continue;
+    }
     if (m.from === 'system') {
       html += '<div style="text-align:center;margin:12px 0;font-size:12px;color:#86868b;">' + m.text + '</div>';
       continue; 
@@ -2575,6 +2576,38 @@ function renderChatMessages() {
       html += '<span style="font-weight:600;color:#555;">' + pokeSenderName + '</span> ' + m.text;
       html += '</div>';
       continue; // 拦截成功，跳过后面的气泡渲染
+    }
+        if (m.type === 'redpacket') {
+      var isMine = m.from === 'user';
+      var rpHtml = '<div data-msg-index="' + i + '" style="display:flex;justify-content:' + (isMine ? 'flex-end' : 'flex-start') + ';margin-bottom:10px;">';
+      rpHtml += '<div onclick="openRedPacketDetail(\'' + m.packetId + '\')" style="cursor:pointer;width:210px;background:linear-gradient(135deg,#fa5151,#d13333);border-radius:12px;padding:14px 16px;color:#fff;box-shadow:0 4px 14px rgba(250,81,81,0.3);' + (m.refunded ? 'opacity:0.55;' : '') + '">';
+      rpHtml += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+      rpHtml += '<span style="font-size:22px;">🧧</span>';
+      rpHtml += '<span style="font-size:14px;font-weight:600;">' + (isMine ? '我发的红包' : m.senderName + ' 发的红包') + '</span>';
+      rpHtml += '</div>';
+      rpHtml += '<div style="font-size:12px;opacity:0.9;line-height:1.4;">' + m.message + '</div>';
+      rpHtml += '<div style="font-size:11px;opacity:0.75;margin-top:6px;">' + (m.refunded ? '已退回' : ('已领 ' + (m.claimed ? m.claimed.length : 0) + '/' + m.maxPeople)) + '</div>';
+      rpHtml += '</div>';
+      rpHtml += '</div>';
+      html += rpHtml;
+      continue;
+    }
+
+    if (m.type === 'gift') {
+      if (!m.claimed) m.claimed = [];
+      var isMineG = m.from === 'user';
+      var gHtml = '<div data-msg-index="' + i + '" style="display:flex;justify-content:' + (isMineG ? 'flex-end' : 'flex-start') + ';margin-bottom:10px;">';
+      gHtml += '<div onclick="openGiftDetail(\'' + m.packetId + '\')" style="cursor:pointer;width:210px;background:linear-gradient(135deg,#f5f5f7,#e8e8ed);border-radius:12px;padding:14px 16px;color:#333;box-shadow:0 4px 14px rgba(0,0,0,0.08);border:1px solid rgba(255,255,255,0.7);' + (m.refunded ? 'opacity:0.55;' : '') + '">';
+      gHtml += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+      gHtml += '<span style="font-size:22px;">🎁</span>';
+      gHtml += '<span style="font-size:14px;font-weight:600;">' + (isMineG ? '我送的礼物' : m.senderName + ' 送的礼物') + '</span>';
+      gHtml += '</div>';
+      gHtml += '<div style="font-size:13px;color:#333;line-height:1.4;">' + m.giftName + ' ×' + m.count + '</div>';
+      gHtml += '<div style="font-size:11px;color:#888;margin-top:6px;">' + formatMoney(m.totalPrice) + ' 元 · ' + (m.refunded ? '已退回' : (m.claimed.length > 0 ? '已领取' : '待领取')) + '</div>';
+      gHtml += '</div>';
+      gHtml += '</div>';
+      html += gHtml;
+      continue;
     }
 
     // 4. 提取图片地址
@@ -2594,7 +2627,7 @@ function renderChatMessages() {
     var textColor = 'color:' + chatSettings.fontColor + ';';
 
     // 5. 用户消息气泡
-    if (m.from === 'user') {
+        if (m.from === 'user') {
       html += '<div data-msg-index="' + i + '" style="display:flex;justify-content:flex-end;align-items:flex-end;gap:8px;margin-bottom:6px;">';
       html += '<div style="max-width:70%;">';
       if (imgSrc) {
@@ -2603,13 +2636,14 @@ function renderChatMessages() {
         html += '<div class="chat-bubble bubble-user ' + styleClass + '" style="' + userBg + textColor + '">' + m.text + '</div>';
       }
       var statusText = m.status === 'read' ? '已读' : '未读';
-html += '<span style="font-size:9px;color:#b0b0b0;display:block;text-align:right;margin-top:2px;">' + statusText + ' &nbsp; ' + timeStr + '</span>';
+      html += '<span style="font-size:9px;color:#b0b0b0;display:block;text-align:right;margin-top:2px;">' + statusText + ' &nbsp; ' + timeStr + '</span>';
       html += '</div>';
       var userAvatar = state.profile.avatar || '';
       html += '<img src="' + userAvatar + '" style="width:32px;height:32px;border-radius:50%;flex-shrink:0;object-fit:cover;">';
       html += '</div>';
     } else {
       // 6. 梦角消息气泡
+      var banStatusCheck = getDreamBanStatus(isGroup ? m.senderId : state.currentChatId);
       var displayAvatar = '';
       var senderName = '';
 
@@ -2638,7 +2672,22 @@ html += '<span style="font-size:9px;color:#b0b0b0;display:block;text-align:right
       if (isGroup && senderName) {
         html += '<span style="font-size:10px;color:#86868b;display:block;margin-bottom:2px;">' + senderName + '</span>';
       }
-      if (imgSrc) {
+          var _banCheck = getDreamBanStatus(isGroup ? m.senderId : state.currentChatId, m.time);
+      if (_banCheck === 'banned') {
+        html += '<div class="chat-bubble bubble-dream ' + styleClass + '" style="' + dreamBg + textColor + 'opacity:0.6;font-style:italic;">此账号已被封禁</div>';
+      } else if (_banCheck === 'apologizing') {
+        if (!m._apologyText) {
+          m._apologyText = pickApology();
+        }
+        html += '<div class="chat-bubble bubble-dream ' + styleClass + '" style="' + dreamBg + textColor + '">';
+        if (imgSrc) {
+          html += '<div style="font-size:11px;opacity:0.7;padding:4px 8px;margin-bottom:4px;background:rgba(0,0,0,0.06);border-left:2px solid #999;border-radius:4px;">[表情]</div>';
+        } else {
+          html += '<div style="font-size:11px;opacity:0.7;padding:4px 8px;margin-bottom:4px;background:rgba(0,0,0,0.06);border-left:2px solid #999;border-radius:4px;">' + m.text + '</div>';
+        }
+        html += m._apologyText;
+        html += '</div>';
+      } else if (imgSrc) {
         html += '<div class="chat-bubble bubble-dream ' + styleClass + '" style="' + dreamBg + textColor + 'padding:4px;"><img src="' + imgSrc + '" style="max-width:120px;max-height:180px;border-radius:6px;object-fit:contain;display:block;"></div>';
       } else {
         html += '<div class="chat-bubble bubble-dream ' + styleClass + '" style="' + dreamBg + textColor + '">' + m.text + '</div>';
@@ -4254,47 +4303,6 @@ function confirmCallSelect() {
   if (ids.length === 0) { showToast('请至少选一个'); return; }
   closeCallSelect();
   startUserDial(ids);
-}
-
-function startUserDial(targetIds) {
-  if (state.callState !== 'idle') { showToast('正在通话中'); return; }
-  var targets = targetIds.map(function(id) {
-    return state.dreams.find(function(d) { return d.id === id; });
-  }).filter(function(d) { return d; });
-  if (targets.length === 0) { showToast('目标不存在'); return; }
-
-  state.callState = 'dialing';
-  window.currentCallTargets = targetIds;
-  window.currentCallType = 'user-dial';
-
-  // 头像是多个人的话，用第一个
-  var avatar = targets[0].avatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2780%27 height=%2780%27 viewBox=%270 0 80 80%27%3E%3Ccircle cx=%2740%27 cy=%2740%27 r=%2740%27 fill=%27%23ffe0e8%27/%3E%3Ctext x=%2740%27 y=%2744%27 text-anchor=%27middle%27 fill=%27%23d6336c%27 font-size=%2728%27%3E💜%3C/text%3E%3C/svg%3E';
-  document.getElementById('callAvatar').src = avatar;
-  document.getElementById('callName').textContent = targets.length > 1 ? targets.length + '人通话' : targets[0].name;
-  document.getElementById('callStatus').textContent = '正在呼叫…';
-  document.getElementById('callTimer').classList.remove('show');
-  document.getElementById('callButtons').innerHTML = '<button class="call-btn hangup" onclick="cancelDial()">☎</button>';
-
-  if (state.settings.callBg) {
-    document.getElementById('callCard').style.background = 'url(' + state.settings.callBg + ') center/cover, linear-gradient(145deg,#1a1a2e,#16213e)';
-  } else {
-    document.getElementById('callCard').style.background = 'linear-gradient(145deg,#1a1a2e,#16213e)';
-  }
-  document.getElementById('callOverlay').classList.add('active');
-  document.getElementById('callMini').classList.remove('show');
-
-  // 多人通话：只要有一个人接就算接通
-  // 简化逻辑：整体随机 70% 接通、20% 拒绝、10% 超时
-  var roll = Math.random();
-  if (roll < 0.7) {
-    var wait = 1000 + Math.random() * 2000;
-    window.aiAnswerTimer = setTimeout(function() { aiAcceptCall(); }, wait);
-  } else if (roll < 0.9) {
-    var wait2 = 1500 + Math.random() * 2000;
-    window.aiAnswerTimer = setTimeout(function() { aiRejectCall(); }, wait2);
-  } else {
-    window.dialTimeoutTimer = setTimeout(function() { aiTimeoutCall(); }, 15000);
-  }
 }
 
 function aiAcceptCall() {
@@ -6660,3 +6668,1990 @@ function deleteStickerFromGroup(groupId, itemIdx) {
   renderStickerGroups();
   showToast('已删除');
 }
+
+// ===== 红包基础函数 =====
+function getDreamBalance(dreamId) {
+  var d = state.dreams.find(function(x) { return x.id === dreamId; });
+  return d && d.balance != null ? d.balance : 0;
+}
+
+function setDreamBalance(dreamId, amount) {
+  var d = state.dreams.find(function(x) { return x.id === dreamId; });
+  if (!d) return;
+  var n = parseFloat(amount) || 0;
+  if (n < 0) n = 0;
+  if (n > 99999999) n = 99999999;
+  d.balance = Math.floor(n * 100) / 100;
+  saveState();
+}
+
+function addDreamBalance(dreamId, amount) {
+  var cur = getDreamBalance(dreamId);
+  setDreamBalance(dreamId, cur + (parseFloat(amount) || 0));
+}
+
+// 微信风格随机分配：把 total 分成 count 份，总和严格等于 total
+function randomSplit(total, count) {
+  if (count <= 0) return [];
+  if (count === 1) return [Math.floor(total * 100) / 100];
+  var remainCents = Math.round(total * 100);
+  var result = [];
+  for (var i = 0; i < count - 1; i++) {
+    var slotsLeft = count - i;
+    var avg = remainCents / slotsLeft;
+    var maxCents = Math.floor(avg * 2);
+    var minCents = 1;
+    if (maxCents < minCents) maxCents = minCents;
+    var pickCents = minCents + Math.floor(Math.random() * (maxCents - minCents + 1));
+    if (pickCents > remainCents - (slotsLeft - 1) * 1) {
+      pickCents = remainCents - (slotsLeft - 1) * 1;
+    }
+    if (pickCents < 1) pickCents = 1;
+    result.push(pickCents / 100);
+    remainCents -= pickCents;
+  }
+  result.push(remainCents / 100);
+  return result;
+}
+
+function formatMoney(n) {
+  return (parseFloat(n) || 0).toFixed(2);
+}
+
+// ===== 红包面板 =====
+function openRedPacketPanel() {
+  document.getElementById('actionMenuPanel').style.display = 'none';
+  var isGroup = state.currentChatId && state.currentChatId.startsWith('group_');
+  var balanceSection = document.getElementById('rpBalanceSection');
+  var peopleRow = document.getElementById('rpPeopleRow');
+
+  if (isGroup) {
+    balanceSection.style.display = 'none';
+    peopleRow.style.display = 'block';
+    var g = state.groups.find(function(x) { return x.id === state.currentChatId; });
+    var maxPeople = g ? g.memberIds.length + 1 : 1;
+    document.getElementById('rpPeople').max = maxPeople;
+    document.getElementById('rpPeople').placeholder = '1 ~ ' + maxPeople;
+  } else {
+    balanceSection.style.display = 'block';
+    peopleRow.style.display = 'none';
+    document.getElementById('rpBalanceNum').textContent = formatMoney(getDreamBalance(state.currentChatId));
+  }
+
+  document.getElementById('rpAmount').value = '';
+  document.getElementById('rpMessage').value = '';
+  document.getElementById('redPacketPanel').style.display = 'flex';
+}
+
+function closeRedPacketPanel() {
+  document.getElementById('redPacketPanel').style.display = 'none';
+}
+
+function openTopupDialog() {
+  if (!state.currentChatId || state.currentChatId.startsWith('group_')) return;
+  var dreamId = state.currentChatId;
+  var v = prompt('给「' + getDreamName(dreamId) + '」充值（最多 99999999）：', '100');
+  if (v === null) return;
+  var n = parseFloat(v);
+  if (isNaN(n) || n <= 0) { showToast('请输入有效金额'); return; }
+  if (n > 99999999) n = 99999999;
+  n = Math.floor(n * 100) / 100;
+
+  var remaining = n;
+
+  // 【新增】优先还债
+  if (state.workShifts && state.workShifts.length > 0) {
+    var debtWorks = state.workShifts.filter(function(w) {
+      return w.dreamId === dreamId && w.debt > 0;
+    });
+    debtWorks.forEach(function(w) {
+      if (remaining <= 0) return;
+      var pay = Math.min(remaining, w.debt);
+      pay = Math.round(pay * 100) / 100;
+      w.debt = Math.round((w.debt - pay) * 100) / 100;
+      remaining = Math.round((remaining - pay) * 100) / 100;
+      w.todayLog.push({
+        hour: new Date().getHours(),
+        min: new Date().getMinutes(),
+        text: '用充值还债 ' + pay.toFixed(2) + ' 元' + (w.debt > 0 ? '（剩欠债 ' + w.debt.toFixed(2) + ' 元）' : '（已还清）'),
+        type: 'repay'
+      });
+    });
+  }
+
+  // 还完剩下的进金库
+  if (remaining > 0) {
+    addDreamBalance(dreamId, remaining);
+  }
+
+  saveState();
+  document.getElementById('rpBalanceNum').textContent = formatMoney(getDreamBalance(dreamId));
+  renderWorkCards();
+
+  if (remaining < n) {
+    showToast('充值 ' + formatMoney(n) + '，其中 ' + formatMoney(n - remaining) + ' 用于还债');
+  } else {
+    showToast('已充值 ' + formatMoney(n));
+  }
+}
+
+function sendRedPacket() {
+  var amount = parseFloat(document.getElementById('rpAmount').value);
+  if (isNaN(amount) || amount <= 0) { showToast('请输入有效金额'); return; }
+  if (amount > 99999999) amount = 99999999;
+  amount = Math.floor(amount * 100) / 100;
+
+  var msg = (document.getElementById('rpMessage').value || '').trim() || '大吉大利，恭喜发财';
+  var isGroup = state.currentChatId && state.currentChatId.startsWith('group_');
+  var maxPeople = 1;
+  var isGroup = state.currentChatId && state.currentChatId.startsWith('group_');
+  var maxPeople = 1;
+  if (isGroup) {
+    var g = state.groups.find(function(x) { return x.id === state.currentChatId; });
+    var groupLimit = g ? (g.memberIds.length + 1) : 1;
+    var people = parseInt(document.getElementById('rpPeople').value) || 1;
+    if (people < 1) people = 1;
+    if (people > groupLimit) people = groupLimit;
+    maxPeople = people;
+  } else {
+    maxPeople = 1;
+  }
+
+  var packet = {
+    from: 'user',
+    senderId: 'user',
+    senderName: state.profile.name || '我',
+    type: 'redpacket',
+    packetId: 'rp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    totalAmount: amount,
+    message: msg,
+    maxPeople: isGroup ? maxPeople : 1,
+    claimed: [],
+    refunded: false,
+    chatId: state.currentChatId,
+    time: Date.now()
+  };
+
+  if (!state.chatSessions[state.currentChatId]) state.chatSessions[state.currentChatId] = [];
+  state.chatSessions[state.currentChatId].push(packet);
+  saveState();
+  loadChatMessages();
+  renderChatMessages();
+  closeRedPacketPanel();
+
+  if (!isGroup && state.currentChatId) {
+    var dreamId = state.currentChatId;
+    setTimeout(function() {
+      if (Math.random() < 0.85) {
+        claimRedPacket(packet.packetId, dreamId);
+      } else {
+       refundRedPacket(packet.packetId, dreamId, '梦角退回') ;
+      }
+    }, 2000 + Math.random() * 3000);
+  } else if (isGroup) {
+    var g2 = state.groups.find(function(x) { return x.id === state.currentChatId; });
+    if (g2) {
+      g2.memberIds.forEach(function(id) {
+        if (Math.random() < 0.65) {
+          setTimeout(function() {
+            claimRedPacket(packet.packetId, id);
+          }, 1500 + Math.random() * 6000);
+        }
+      });
+    }
+  }
+}
+
+function claimRedPacket(packetId, claimerId) {
+  if (!state.chatSessions) return;
+  for (var chatId in state.chatSessions) {
+    var msgs = state.chatSessions[chatId];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (m && m.type === 'redpacket' && m.packetId === packetId) {
+        if (m.refunded) return;
+        if (m.claimed.length >= m.maxPeople) return;
+        if (m.claimed.some(function(c) { return c.userId === claimerId; })) return;
+
+        var remain = m.totalAmount - m.claimed.reduce(function(s, c) { return s + c.amount; }, 0);
+        remain = Math.round(remain * 100) / 100;
+        var slots = m.maxPeople - m.claimed.length;
+        var splits = randomSplit(remain, slots);
+        var got = splits[0];
+        if (got < 0.01) got = 0.01;
+        if (got > remain) got = remain;
+        got = Math.round(got * 100) / 100;
+
+        m.claimed.push({
+          userId: claimerId,
+          name: claimerId === 'user' ? (state.profile.name || '我') : getDreamName(claimerId),
+          amount: got,
+          time: Date.now()
+        });
+
+        // 【新增】：梦角领到的钱，优先还债
+        if (claimerId !== 'user') {
+          var remaining = got;
+          // 找出这个梦角所有欠债的打工记录
+          if (state.workShifts && state.workShifts.length > 0) {
+            var debtWorks = state.workShifts.filter(function(w) {
+              return w.dreamId === claimerId && w.debt > 0;
+            });
+            debtWorks.forEach(function(w) {
+              if (remaining <= 0) return;
+              var pay = Math.min(remaining, w.debt);
+              pay = Math.round(pay * 100) / 100;
+              w.debt = Math.round((w.debt - pay) * 100) / 100;
+              remaining = Math.round((remaining - pay) * 100) / 100;
+              // 在打工记录里也留一条
+              w.todayLog.push({
+                hour: new Date().getHours(),
+                min: new Date().getMinutes(),
+                text: '用红包还债 ' + pay.toFixed(2) + ' 元' + (w.debt > 0 ? '（剩欠债 ' + w.debt.toFixed(2) + ' 元）' : '（已还清）'),
+                type: 'repay'
+              });
+            });
+          }
+          // 还完债剩下的才进金库
+          if (remaining > 0) {
+            addDreamBalance(claimerId, remaining);
+          }
+          saveState();
+          renderWorkCards();
+        }
+
+        var claimName = claimerId === 'user' ? (state.profile.name || '我') : getDreamName(claimerId);
+        state.chatSessions[chatId].push({ from: 'system', text: '「' + claimName + '」领取了红包', time: Date.now() });
+
+        saveState();
+        if (state.currentChatId === chatId) {
+          loadChatMessages();
+          renderChatMessages();
+        }
+        return;
+      }
+    }
+  }
+}
+
+function refundRedPacket(packetId, rejecterId, reason) {
+  if (!state.chatSessions) return;
+  for (var chatId in state.chatSessions) {
+    var msgs = state.chatSessions[chatId];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (m && m.type === 'redpacket' && m.packetId === packetId) {
+        if (m.refunded) return;
+        var remain = m.totalAmount - m.claimed.reduce(function(s, c) { return s + c.amount; }, 0);
+        remain = Math.max(0, Math.round(remain * 100) / 100);
+        if (m.from === 'dream' && m.senderId) {
+          addDreamBalance(m.senderId, remain);
+        }
+        m.refunded = true;
+        m.refundReason = reason || '已退回';
+        var rejName = rejecterId === 'user' ? (state.profile.name || '我') : getDreamName(rejecterId);
+        state.chatSessions[chatId].push({ from: 'system', text: '「' + rejName + '」退回了红包', time: Date.now() });
+        saveState();
+        if (state.currentChatId === chatId) {
+          loadChatMessages();
+          renderChatMessages();
+        }
+        return;
+      }
+    }
+  }
+}
+
+function openRedPacketDetail(packetId) {
+  if (!state.chatSessions) return;
+  for (var chatId in state.chatSessions) {
+    var msgs = state.chatSessions[chatId];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (m && m.type === 'redpacket' && m.packetId === packetId) {
+        document.getElementById('rpdSender').textContent = '来自 ' + m.senderName + ' 的红包';
+        document.getElementById('rpdAmount').textContent = formatMoney(m.totalAmount);
+        document.getElementById('rpdMessage').textContent = m.message;
+
+        var list = document.getElementById('rpdClaimList');
+        var html = '';
+
+        // 判断：是不是梦角发的，且用户还没领，且没退回 → 显示领取/退回按钮
+        var fromDream = (m.from === 'dream');
+        var userClaimed = m.claimed.some(function(c) { return c.userId === 'user'; });
+                var isGroupChat = chatId && chatId.startsWith('group_');
+        var needUserAction = !userClaimed && !m.refunded && m.claimed.length < m.maxPeople &&
+          ((m.from === 'dream') || (m.from === 'user' && isGroupChat));
+
+        if (needUserAction) {
+          html += '<div style="display:flex;gap:10px;margin-bottom:14px;">';
+          html += '<button onclick="userClaimRedPacket(\'' + m.packetId + '\')" style="flex:1;padding:11px;border:none;border-radius:12px;background:#fa5151;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">领取</button>';
+          html += '<button onclick="userRejectRedPacket(\'' + m.packetId + '\')" style="flex:1;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">退回</button>';
+          html += '</div>';
+        }
+
+        if (m.claimed.length === 0) {
+          html += '<div style="text-align:center;color:#86868b;font-size:13px;padding:20px 0;">暂无人领取</div>';
+        } else {
+          var sorted = m.claimed.slice().sort(function(a, b) { return b.amount - a.amount; });
+          html += '<div style="font-size:12px;color:#86868b;margin-bottom:10px;">已领取 ' + m.claimed.length + '/' + m.maxPeople + ' 个</div>';
+          sorted.forEach(function(c, idx) {
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f5;">';
+            html += '<span style="font-size:14px;color:#1d1d1f;">' + (idx === 0 ? '👑 ' : '') + c.name + '</span>';
+            html += '<span style="font-size:14px;font-weight:600;color:#fa5151;">' + formatMoney(c.amount) + '</span>';
+            html += '</div>';
+          });
+          if (m.refunded) {
+            html += '<div style="margin-top:10px;text-align:center;font-size:12px;color:#86868b;">已退回（' + (m.refundReason || '') + '）</div>';
+          }
+        }
+        list.innerHTML = html;
+        document.getElementById('redPacketDetail').style.display = 'flex';
+        return;
+      }
+    }
+  }
+}
+
+// 用户领取梦角发的红包
+function userClaimRedPacket(packetId) {
+  if (!state.chatSessions) return;
+  for (var chatId in state.chatSessions) {
+    var msgs = state.chatSessions[chatId];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (m && m.type === 'redpacket' && m.packetId === packetId) {
+        if (m.refunded) { showToast('红包已退回'); return; }
+        if (m.claimed.length >= m.maxPeople) { showToast('红包已被领完'); return; }
+        if (m.claimed.some(function(c) { return c.userId === 'user'; })) { showToast('你已经领过了'); return; }
+        if (m.from === 'user' && !chatId.startsWith('group_')) { showToast('私聊里不能领自己发的红包'); return; }
+
+        var remain = m.totalAmount - m.claimed.reduce(function(s, c) { return s + c.amount; }, 0);
+        remain = Math.round(remain * 100) / 100;
+        var slots = m.maxPeople - m.claimed.length;
+        var splits = randomSplit(remain, slots);
+        var got = splits[0];
+        if (got < 0.01) got = 0.01;
+        if (got > remain) got = remain;
+
+        m.claimed.push({
+          userId: 'user',
+          name: state.profile.name || '我',
+          amount: Math.round(got * 100) / 100,
+          time: Date.now()
+        });
+
+        state.chatSessions[chatId].push({ from: 'system', text: '「' + (state.profile.name || '我') + '」领取了红包', time: Date.now() });
+        saveState();
+        closeRedPacketDetail();
+        if (state.currentChatId === chatId) {
+          loadChatMessages();
+          renderChatMessages();
+        }
+        showToast('已领取 ' + formatMoney(got));
+        return;
+      }
+    }
+  }
+}
+
+// 用户退回梦角发的红包
+function userRejectRedPacket(packetId) {
+  if (!confirm('确定退回这个红包吗？')) return;
+  refundRedPacket(packetId, 'user', '用户退回');
+  closeRedPacketDetail();
+}
+
+function closeRedPacketDetail() {
+  document.getElementById('redPacketDetail').style.display = 'none';
+}
+
+// ===== 红包 24 小时超时退回 =====
+function checkRedPacketExpiry() {
+  if (!state.chatSessions) return;
+  var now = Date.now();
+  var EXPIRE_MS = 24 * 60 * 60 * 1000; // 24 小时
+  var changed = false;
+
+  for (var chatId in state.chatSessions) {
+    var msgs = state.chatSessions[chatId];
+    if (!Array.isArray(msgs)) continue;
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (!m || m.type !== 'redpacket') continue;
+      if (m.refunded) continue;                                // 已退回
+      if (now - m.time < EXPIRE_MS) continue;                  // 还没到 24 小时
+      if (m.claimed.length >= m.maxPeople) continue;           // 已领完
+
+      var remain = m.totalAmount - m.claimed.reduce(function(s, c) { return s + c.amount; }, 0);
+      remain = Math.max(0, Math.round(remain * 100) / 100);
+
+      // 如果是梦角发的，剩余金额退回梦角金库
+      if (m.from === 'dream' && m.senderId && remain > 0) {
+        addDreamBalance(m.senderId, remain);
+      }
+
+      m.refunded = true;
+      m.refundReason = '超时未领完';
+      m.refundAt = now;
+
+      msgs.push({
+        from: 'system',
+        text: '红包超时未领完，剩余 ' + formatMoney(remain) + ' 已退回给「' + m.senderName + '」',
+        time: now
+      });
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    saveState();
+    if (state.currentChatId) {
+      loadChatMessages();
+      renderChatMessages();
+    }
+  }
+}
+
+// ===== 送礼模块 · 数据层 =====
+var DEFAULT_GIFTS = [
+  { id: 'gift_1', name: '蛋糕', price: 5 },
+  { id: 'gift_2', name: '花',   price: 10 },
+  { id: 'gift_3', name: '奶茶', price: 15 }
+];
+
+function getGiftItems() {
+  if (!state.giftItems || !Array.isArray(state.giftItems) || state.giftItems.length === 0) {
+      if (!state.workShifts || !Array.isArray(state.workShifts)) {
+      if (!state.bannedDreams || !Array.isArray(state.bannedDreams)) state.bannedDreams = [];
+  if (!state.apologizingDreams || !Array.isArray(state.apologizingDreams)) state.apologizingDreams = [];
+  if (!state.cheatUsage || typeof state.cheatUsage !== 'object') {
+      if (!state.musicLibrary || typeof state.musicLibrary !== 'object') {
+    state.musicLibrary = { songs: [], playlists: [] };
+  }
+    state.cheatUsage = { date: '', unbanGroups: [], seizeGroups: [] };
+  }
+    state.workShifts = [];
+  }
+      if (!state.workShifts || !Array.isArray(state.workShifts)) {
+    state.workShifts = [];
+  }
+    state.giftItems = JSON.parse(JSON.stringify(DEFAULT_GIFTS));
+    saveState();
+  }
+  return state.giftItems;
+}
+
+function saveGiftItems() {
+  saveState();
+}
+
+// ===== 送礼模块 · 面板 =====
+var giftEditMode = false;
+
+function openGiftPanel() {
+  document.getElementById('actionMenuPanel').style.display = 'none';
+
+  // 只允许私聊
+  if (!state.currentChatId || state.currentChatId.startsWith('group_')) {
+    showToast('送礼只能在私聊里使用');
+    return;
+  }
+
+  giftEditMode = false;
+  updateGiftEditBtn();
+  renderGiftList();
+  document.getElementById('giftPanel').style.display = 'flex';
+}
+
+function closeGiftPanel() {
+  document.getElementById('giftPanel').style.display = 'none';
+}
+
+function toggleGiftEditMode() {
+  giftEditMode = !giftEditMode;
+  updateGiftEditBtn();
+  renderGiftList();
+}
+
+function updateGiftEditBtn() {
+  var btn = document.getElementById('giftEditBtn');
+  if (!btn) return;
+  btn.textContent = giftEditMode ? '完成' : '编辑';
+  btn.style.background = giftEditMode ? '#ff3b30' : '#fff';
+  btn.style.color = giftEditMode ? '#fff' : '#007aff';
+}
+
+function renderGiftList() {
+  var container = document.getElementById('giftListContainer');
+  if (!container) return;
+  var items = getGiftItems();
+
+  var html = '';
+
+  if (giftEditMode) {
+    // 编辑模式：可以改名、改价、删除，底部加「+ 添加礼品」
+    items.forEach(function(g, idx) {
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f5;">';
+      html += '<input type="text" value="' + (g.name || '').replace(/"/g, '&quot;') + '" onchange="updateGiftName(' + idx + ', this.value)" style="flex:2;padding:6px 10px;border:1px solid #e5e5ea;border-radius:8px;font-size:13px;outline:none;box-sizing:border-box;">';
+      html += '<input type="number" value="' + g.price + '" step="0.01" min="0.01" max="99999999" onchange="updateGiftPrice(' + idx + ', this.value)" style="flex:1;padding:6px 10px;border:1px solid #e5e5ea;border-radius:8px;font-size:13px;outline:none;box-sizing:border-box;width:70px;">';
+      html += '<span onclick="deleteGiftItem(' + idx + ')" style="color:#ff3b30;cursor:pointer;font-size:16px;padding:0 4px;">×</span>';
+      html += '</div>';
+    });
+    html += '<button onclick="addGiftItem()" style="width:100%;margin-top:10px;padding:9px;border:1px dashed #e5e5ea;background:transparent;border-radius:10px;color:#007aff;font-size:13px;cursor:pointer;">+ 添加礼品</button>';
+  } else {
+    // 正常模式：点一下选礼品
+    if (items.length === 0) {
+      html = '<div style="text-align:center;color:#86868b;padding:30px 0;font-size:13px;">还没有礼品，点右上角「编辑」添加</div>';
+    } else {
+      items.forEach(function(g, idx) {
+        html += '<div onclick="sendGiftByIndex(' + idx + ')" style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;margin-bottom:8px;background:#f8f8fa;border-radius:12px;cursor:pointer;">';
+        html += '<span style="font-size:14px;color:#1d1d1f;">' + g.name + '</span>';
+        html += '<span style="font-size:13px;color:#fa5151;font-weight:600;">' + formatMoney(g.price) + ' 元</span>';
+        html += '</div>';
+      });
+    }
+  }
+
+  container.innerHTML = html;
+}
+
+function addGiftItem() {
+  var items = getGiftItems();
+  items.push({ id: 'gift_' + Date.now(), name: '新礼品', price: 1 });
+  saveGiftItems();
+  renderGiftList();
+}
+
+function updateGiftName(idx, val) {
+  var items = getGiftItems();
+  if (idx < 0 || idx >= items.length) return;
+  items[idx].name = (val || '').trim() || '未命名';
+  saveGiftItems();
+}
+
+function updateGiftPrice(idx, val) {
+  var items = getGiftItems();
+  if (idx < 0 || idx >= items.length) return;
+  var n = parseFloat(val) || 0;
+  if (n < 0.01) n = 0.01;
+  if (n > 99999999) n = 99999999;
+  items[idx].price = Math.floor(n * 100) / 100;
+  saveGiftItems();
+}
+
+function deleteGiftItem(idx) {
+  var items = getGiftItems();
+  if (idx < 0 || idx >= items.length) return;
+  items.splice(idx, 1);
+  saveGiftItems();
+  renderGiftList();
+}
+
+// ===== 送礼模块 · 发送逻辑 =====
+function sendGiftByIndex(idx) {
+  var items = getGiftItems();
+  if (idx < 0 || idx >= items.length) return;
+  var gift = items[idx];
+
+  var countStr = prompt('送几份「' + gift.name + '」？', '1');
+  if (countStr === null) return;
+  var count = parseInt(countStr) || 0;
+  if (count < 1) { showToast('请输入有效份数'); return; }
+
+  var totalPrice = Math.floor(gift.price * count * 100) / 100;
+
+  var packet = {
+    from: 'user',
+    senderId: 'user',
+    senderName: state.profile.name || '我',
+    type: 'gift',
+    packetId: 'gf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    giftName: gift.name,
+    unitPrice: gift.price,
+    count: count,
+    totalPrice: totalPrice,
+    claimed: [],
+    refunded: false,
+    chatId: state.currentChatId,
+    time: Date.now()
+  };
+
+  if (!state.chatSessions[state.currentChatId]) state.chatSessions[state.currentChatId] = [];
+  state.chatSessions[state.currentChatId].push(packet);
+  saveState();
+  loadChatMessages();
+  renderChatMessages();
+  closeGiftPanel();
+
+  // 梦角决定领不领
+  var dreamId = state.currentChatId;
+  setTimeout(function() {
+    if (Math.random() < 0.8) {
+      // 领取
+      state.chatSessions[dreamId].push({ from: 'system', text: '「' + getDreamName(dreamId) + '」领取了礼物', time: Date.now() });
+      packet.claimed.push({ userId: dreamId, name: getDreamName(dreamId), time: Date.now() });
+      saveState();
+    } else {
+      // 拒绝
+      packet.refunded = true;
+      packet.refundReason = '梦角拒绝';
+      state.chatSessions[dreamId].push({ from: 'system', text: '「' + getDreamName(dreamId) + '」拒绝了礼物', time: Date.now() });
+      saveState();
+    }
+    if (state.currentChatId === dreamId) {
+      loadChatMessages();
+      renderChatMessages();
+    }
+  }, 2000 + Math.random() * 3000);
+}
+
+function openGiftDetail(packetId) {
+  if (!state.chatSessions) return;
+  for (var chatId in state.chatSessions) {
+    var msgs = state.chatSessions[chatId];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (m && m.type === 'gift' && m.packetId === packetId) {
+        document.getElementById('gdSender').textContent = '来自 ' + m.senderName + ' 的礼物';
+        document.getElementById('gdName').textContent = m.giftName + ' ×' + m.count;
+        document.getElementById('gdPrice').textContent = formatMoney(m.totalPrice) + ' 元';
+
+        var actionArea = document.getElementById('gdActionArea');
+        var html = '';
+
+        var fromDream = (m.from === 'dream');
+        var userClaimed = m.claimed.some(function(c) { return c.userId === 'user'; });
+        var needUserAction = fromDream && !userClaimed && !m.refunded;
+
+        if (needUserAction) {
+          html += '<div style="display:flex;gap:10px;margin-bottom:14px;">';
+          html += '<button onclick="userClaimGift(\'' + m.packetId + '\')" style="flex:1;padding:11px;border:none;border-radius:12px;background:#fa5151;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">领取</button>';
+          html += '<button onclick="userRejectGift(\'' + m.packetId + '\')" style="flex:1;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">拒绝</button>';
+          html += '</div>';
+        }
+
+        if (m.claimed.length === 0) {
+          html += '<div style="text-align:center;color:#86868b;font-size:13px;padding:10px 0;">暂无人领取</div>';
+        } else {
+          html += '<div style="font-size:12px;color:#86868b;margin-bottom:8px;">已领取</div>';
+          m.claimed.forEach(function(c) {
+            html += '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px;color:#1d1d1f;">';
+            html += '<span>' + c.name + '</span>';
+            html += '<span style="color:#fa5151;font-weight:600;">' + formatMoney(m.totalPrice) + ' 元</span>';
+            html += '</div>';
+          });
+        }
+        if (m.refunded) {
+          html += '<div style="margin-top:10px;text-align:center;font-size:12px;color:#86868b;">已退回（' + (m.refundReason || '') + '）</div>';
+        }
+
+        actionArea.innerHTML = html;
+        document.getElementById('giftDetail').style.display = 'flex';
+        return;
+      }
+    }
+  }
+}
+
+function closeGiftDetail() {
+  document.getElementById('giftDetail').style.display = 'none';
+}
+
+function userClaimGift(packetId) {
+  if (!state.chatSessions) return;
+  for (var chatId in state.chatSessions) {
+    var msgs = state.chatSessions[chatId];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (m && m.type === 'gift' && m.packetId === packetId) {
+        if (m.refunded) { showToast('礼物已退回'); return; }
+        if (m.claimed.some(function(c) { return c.userId === 'user'; })) { showToast('你已经领取了'); return; }
+
+        m.claimed.push({ userId: 'user', name: state.profile.name || '我', time: Date.now() });
+        state.chatSessions[chatId].push({ from: 'system', text: '「' + (state.profile.name || '我') + '」领取了礼物', time: Date.now() });
+        saveState();
+        closeGiftDetail();
+        if (state.currentChatId === chatId) {
+          loadChatMessages();
+          renderChatMessages();
+        }
+        showToast('已领取');
+        return;
+      }
+    }
+  }
+}
+
+function userRejectGift(packetId) {
+  if (!confirm('确定拒绝这个礼物吗？')) return;
+  if (!state.chatSessions) return;
+  for (var chatId in state.chatSessions) {
+    var msgs = state.chatSessions[chatId];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (m && m.type === 'gift' && m.packetId === packetId) {
+        if (m.refunded) return;
+        // 如果是梦角发的，钱退回梦角金库
+        if (m.from === 'dream' && m.senderId) {
+          addDreamBalance(m.senderId, m.totalPrice);
+        }
+        m.refunded = true;
+        m.refundReason = '用户拒绝';
+        state.chatSessions[chatId].push({ from: 'system', text: '「' + (state.profile.name || '我') + '」拒绝了礼物', time: Date.now() });
+        saveState();
+        closeGiftDetail();
+        if (state.currentChatId === chatId) {
+          loadChatMessages();
+          renderChatMessages();
+        }
+        showToast('已拒绝');
+        return;
+      }
+    }
+  }
+}
+
+// ===== 打工系统 · 场景配置 =====
+var WORK_SCENES = [
+  {
+    id: 'cafe',
+    name: '咖啡馆',
+    hourlyWage: 15,
+    shifts: [[8, 11], [14, 17]]
+  },
+  {
+    id: 'library',
+    name: '图书馆',
+    hourlyWage: 10,
+    shifts: [[8, 12], [14, 16]]
+  },
+  {
+    id: 'milktea',
+    name: '奶茶店',
+    hourlyWage: 10,
+    shifts: [[8, 16]]
+  },
+  {
+    id: 'catcafe',
+    name: '猫咖馆',
+    hourlyWage: 20,
+    shifts: [[9, 11], [14, 18]]
+  },
+  {
+    id: 'convenience_day',
+    name: '便利店白班',
+    hourlyWage: 25,
+    shifts: [[6, 12], [14, 17]]
+  },
+  {
+    id: 'convenience_night',
+    name: '便利店晚班',
+    hourlyWage: 15,
+    shifts: [[18, 23]]
+  }
+];
+
+// 扣钱原因
+var WORK_PENALTIES = [
+  { reason: '玩手机', amount: 5 },
+  { reason: '摸鱼', amount: 3 },
+  { reason: '损坏工作器材', amount: 20 },
+  { reason: '顶撞老板', amount: 10 },
+  { reason: '迟到', amount: 5 }
+];
+
+// 奖金原因
+var WORK_BONUSES = [
+  { reason: '优秀员工', amount: 5, weight: 45 },
+  { reason: '效率高效', amount: 3, weight: 45 },
+  { reason: '模范员工', amount: 10, weight: 10 }
+];
+
+// 按权重随机抽奖金
+function pickRandomBonus() {
+  var total = WORK_BONUSES.reduce(function(s, b) { return s + b.weight; }, 0);
+  var r = Math.random() * total;
+  for (var i = 0; i < WORK_BONUSES.length; i++) {
+    if (r < WORK_BONUSES[i].weight) return WORK_BONUSES[i];
+    r -= WORK_BONUSES[i].weight;
+  }
+  return WORK_BONUSES[0];
+}
+
+// 按 id 找场景
+function getWorkScene(sceneId) {
+  return WORK_SCENES.find(function(s) { return s.id === sceneId; });
+}
+
+// 计算某个场景今天的总工时（小时）
+function getSceneDailyHours(scene) {
+  if (!scene) return 0;
+  var total = 0;
+  scene.shifts.forEach(function(s) { total += (s[1] - s[0]); });
+  return total;
+}
+
+// 判断某个场景在某个时刻是否处于工作时段
+function isSceneWorkingAt(scene, date) {
+  if (!scene) return false;
+  var h = date.getHours();
+  for (var i = 0; i < scene.shifts.length; i++) {
+    if (h >= scene.shifts[i][0] && h < scene.shifts[i][1]) return true;
+  }
+  return false;
+}
+
+// 格式化时间：8 → "08:00"
+function fmtHour(h, m) {
+  var hh = String(h).padStart(2, '0');
+  var mm = String(m || 0).padStart(2, '0');
+  return hh + ':' + mm;
+}
+
+// ===== 打工系统 · 面板 =====
+var workSelectedSceneId = null;
+
+function openWorkPicker() {
+  // 填充梦角下拉
+  var sel = document.getElementById('workDreamSelect');
+  var idleDreams = state.dreams.filter(function(d) {
+    return !state.workShifts.some(function(w) { return w.dreamId === d.id && w.active; });
+  });
+  if (idleDreams.length === 0) {
+    showToast('所有梦角都在打工中，没有空闲的');
+    return;
+  }
+  sel.innerHTML = idleDreams.map(function(d) {
+    return '<option value="' + d.id + '">' + d.name + '</option>';
+  }).join('');
+
+  // 渲染场景列表
+  workSelectedSceneId = WORK_SCENES[0].id;
+  renderWorkSceneList();
+  document.getElementById('workPickerModal').style.display = 'flex';
+}
+
+function renderWorkSceneList() {
+  var list = document.getElementById('workSceneList');
+  list.innerHTML = WORK_SCENES.map(function(s) {
+    var active = s.id === workSelectedSceneId;
+    var hours = getSceneDailyHours(s);
+    var dailyPay = (hours * s.hourlyWage).toFixed(0);
+    return '<div onclick="pickWorkScene(\'' + s.id + '\')" style="padding:10px 12px;border-radius:12px;margin-bottom:8px;cursor:pointer;border:2px solid ' + (active ? '#007aff' : '#f0f0f5') + ';background:' + (active ? 'rgba(0,122,255,0.06)' : '#f8f8fa') + ';">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;">'
+      + '<span style="font-size:14px;font-weight:600;color:#1d1d1f;">' + s.name + '</span>'
+      + '<span style="font-size:13px;color:#fa5151;font-weight:600;">' + s.hourlyWage + ' 元/时</span>'
+      + '</div>'
+      + '<div style="font-size:11px;color:#86868b;margin-top:4px;">工时 ' + hours + ' 小时 · 日薪 ' + dailyPay + ' 元</div>'
+      + '<div style="font-size:11px;color:#86868b;margin-top:2px;">' + s.shifts.map(function(p) { return fmtHour(p[0]) + '-' + fmtHour(p[1]); }).join('、') + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function pickWorkScene(id) {
+  workSelectedSceneId = id;
+  renderWorkSceneList();
+}
+
+function closeWorkPicker() {
+  document.getElementById('workPickerModal').style.display = 'none';
+}
+
+function confirmWorkPicker() {
+  var dreamId = document.getElementById('workDreamSelect').value;
+  if (!dreamId) return;
+  var sceneId = workSelectedSceneId;
+  if (!sceneId) { showToast('请选择工作'); return; }
+
+  var dream = state.dreams.find(function(d) { return d.id === dreamId; });
+  var scene = getWorkScene(sceneId);
+  if (!dream || !scene) return;
+
+  // 建议打工：95% 接受
+  var accept = Math.random() < 0.95;
+  closeWorkPicker();
+
+  if (!accept) {
+    showToast('「' + dream.name + '」拒绝了去' + scene.name + '打工');
+    return;
+  }
+
+  // 创建打工记录
+  var today = new Date();
+  var todayStr = today.toISOString().slice(0, 10);
+  var record = {
+    id: 'ws_' + Date.now(),
+    dreamId: dreamId,
+    dreamName: dream.name,
+    sceneId: sceneId,
+    sceneName: scene.name,
+    hourlyWage: scene.hourlyWage,
+    mood: 100,              // 心情值
+    active: true,           // 是否还在打工（辞职后变 false）
+    startedDate: todayStr,  // 开始打工的日期
+    createdAt: Date.now(),
+    todayLog: [],           // 今天的事件记录
+    todayEarnings: 0,       // 今天累计（奖金-扣钱）
+    debt: 0,                // 欠债
+    todayDate: '',          // 当前记录归属的日期
+    isWorking: false,       // 当前是否在工作时段内
+    lastEventCheck: 0,      // 上次事件检测时间戳
+    hasLateToday: false,    // 今天是否已迟到
+    hasLeaveToday: false    // 今天是否请假
+  };
+
+  // 初始心情值：60%~100%
+  record.mood = 60 + Math.floor(Math.random() * 41);
+  record.todayDate = todayStr;
+  record.lastEventCheck = Date.now();
+    record.lastSettledDate = '';
+  record.todaySettledAmount = null;
+
+  // 判断今天是否请假（1%）
+  if (Math.random() < 0.01) {
+    record.hasLeaveToday = true;
+    record.todayLog.push({ hour: 0, min: 0, text: '今日请假', type: 'leave' });
+  }
+  // 判断今天是否迟到（5%）
+  else if (Math.random() < 0.05) {
+    record.hasLateToday = true;
+  }
+
+  state.workShifts.push(record);
+  saveState();
+  renderWorkCards();
+  showToast('「' + dream.name + '」接受了，明天开始去' + scene.name + '打工');
+}
+
+function renderWorkCards() {
+  var container = document.getElementById('workCardsContainer');
+  if (!container) return;
+
+  if (!state.workShifts || state.workShifts.length === 0) {
+    container.innerHTML = '<div style="padding:60px 20px;text-align:center;color:#86868b;font-size:14px;">还没有梦角在打工<br>点右上角 + 建议梦角去打工吧</div>';
+    return;
+  }
+
+  var html = '';
+  state.workShifts.forEach(function(w) {
+    var moodColor = w.mood >= 70 ? '#34c759' : (w.mood >= 30 ? '#ff9500' : '#ff3b30');
+    var statusText;
+    if (!w.active) statusText = '已辞职';
+    else if (w.hasLeaveToday) statusText = '今日请假';
+    else if (w.isWorking) statusText = '正在工作';
+    else statusText = '已下班';
+
+    html += '<div style="background:rgba(240,240,245,0.75);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:0 2px 10px rgba(0,0,0,0.05);border:1px solid rgba(255,255,255,0.7);">';
+
+    html += '<div onclick="toggleWorkHistory(\'' + w.id + '\')" style="display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;">';
+    html += '<div>';
+    html += '<div style="font-size:15px;font-weight:600;color:#1d1d1f;">' + w.dreamName + '</div>';
+    if (w.debt > 0) {
+      html += '<div style="font-size:11px;color:#ff3b30;margin-top:2px;">欠债 ' + formatMoney(w.debt) + ' 元</div>';
+    }
+    html += '</div>';
+    html += '<div style="font-size:12px;color:#86868b;text-align:right;">';
+    html += '<div>心情值：<span style="color:' + moodColor + ';font-weight:600;">' + w.mood + '%</span></div>';
+    html += '<div style="margin-top:2px;">' + w.sceneName + ' · ' + statusText + '</div>';
+    html += '</div>';
+    html += '</div>';
+
+    if (!w.active) {
+      html += '<button onclick="event.stopPropagation();deleteWorkCard(\'' + w.id + '\')" style="margin-top:10px;width:100%;padding:8px;border:1px solid #ff3b30;background:transparent;color:#ff3b30;border-radius:10px;font-size:13px;cursor:pointer;">删除卡片</button>';
+    }
+
+    html += '<div class="work-history" id="wh_' + w.id + '" style="display:none;margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,0.06);">';
+
+    var todayTotal = 0;
+    if (w.todaySettledAmount != null) {
+      todayTotal = w.todaySettledAmount;
+    } else if (w.hasLeaveToday) {
+      todayTotal = 0;
+    } else {
+      todayTotal = w.todayEarnings || 0;
+    }
+    var todayTotalText;
+    var todayTotalColor;
+    if (todayTotal > 0) { todayTotalText = '+' + todayTotal.toFixed(2) + ' 元'; todayTotalColor = '#34c759'; }
+    else if (todayTotal < 0) { todayTotalText = todayTotal.toFixed(2) + ' 元'; todayTotalColor = '#ff3b30'; }
+    else { todayTotalText = '0.00 元'; todayTotalColor = '#86868b'; }
+
+    html += '<div style="font-size:13px;font-weight:600;color:' + todayTotalColor + ';margin-bottom:10px;padding-bottom:8px;border-bottom:1px dashed rgba(0,0,0,0.08);">';
+    html += '今日累计：' + todayTotalText;
+    if (w.hasLeaveToday) html += ' <span style="font-size:11px;color:#86868b;font-weight:400;">（今日请假）</span>';
+    html += '</div>';
+
+    html += '<div style="font-size:12px;color:#86868b;margin-bottom:8px;">今天的工作记录（最上方最新）</div>';
+    html += '<div style="max-height:240px;overflow-y:auto;">';
+    if (!w.todayLog || w.todayLog.length === 0) {
+      html += '<div style="font-size:12px;color:#bbb;text-align:center;padding:10px 0;">今天还没有记录</div>';
+    } else {
+      var reversed = w.todayLog.slice().reverse();
+      reversed.forEach(function(ev) {
+        html += '<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:#555;border-bottom:1px solid rgba(0,0,0,0.03);">';
+        html += '<span style="color:#86868b;">' + fmtHour(ev.hour, ev.min) + '</span>';
+        html += '<span style="flex:1;text-align:right;margin-left:8px;">' + ev.text + '</span>';
+        html += '</div>';
+      });
+    }
+    html += '</div>';
+    html += '</div>';
+
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function deleteWorkCard(workId) {
+  if (!confirm('确定删除这张打工卡片吗？')) return;
+  state.workShifts = state.workShifts.filter(function(x) { return x.id !== workId; });
+  saveState();
+  renderWorkCards();
+}
+
+function toggleWorkHistory(workId) {
+  var el = document.getElementById('wh_' + workId);
+  if (!el) return;
+  el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'block' : 'none';
+}
+
+// ===== 打工系统 · 定时运行 =====
+var workTickInterval = null;
+
+function startWorkSystem() {
+  if (workTickInterval) clearInterval(workTickInterval);
+  // 每 1 分钟跑一次
+  workTickInterval = setInterval(tickWorkSystem, 60 * 1000);
+  // 启动时也立刻跑一次
+  tickWorkSystem();
+}
+
+function tickWorkSystem() {
+  if (!state.workShifts || state.workShifts.length === 0) return;
+  var now = new Date();
+  var nowTs = now.getTime();
+  var todayStr = now.toISOString().slice(0, 10);
+  var nowHour = now.getHours();
+  var nowMin = now.getMinutes();
+
+  state.workShifts.forEach(function(w) {
+    if (!w.active) return;
+
+    var scene = getWorkScene(w.sceneId);
+    if (!scene) return;
+
+    // 1. 跨天检测
+    if (w.todayDate !== todayStr) {
+      // 昨天还没结算 → 先结算昨天的
+      if (w.lastSettledDate !== w.todayDate) {
+        settleDailyWage(w);
+      }
+      dailyResetWork(w, todayStr);
+    }
+
+    // 请假的话今天就什么都不做
+    if (w.hasLeaveToday) return;
+
+    // 2. 判断是否处于工作时段
+    var inShift = isSceneWorkingAt(scene, now);
+
+    // 3. 上/下班切换
+    if (inShift && !w.isWorking) {
+      w.isWorking = true;
+      if (w.hasLateToday && !w.lateLogged) {
+        w.lateLogged = true;
+        w.todayEarnings -= 5;
+        w.todayLog.push({
+          hour: nowHour, min: nowMin,
+          text: '迟到，' + fmtHour(nowHour, nowMin) + ' 才到',
+          type: 'checkin'
+        });
+        w.todayLog.push({
+          hour: nowHour, min: nowMin,
+          text: '因「迟到」被扣 5 元',
+          type: 'penalty',
+          amount: 5
+        });
+      } else {
+        w.todayLog.push({
+          hour: nowHour, min: nowMin,
+          text: '开始上班',
+          type: 'checkin'
+        });
+      }
+      saveState();
+    } else if (!inShift && w.isWorking) {
+      w.isWorking = false;
+      w.todayLog.push({
+        hour: nowHour, min: nowMin,
+        text: '下班休息',
+        type: 'checkout'
+      });
+      saveState();
+    }
+
+    // 4. 到了最后下班时间，且今天还没结算 → 结算
+    var lastEnd = scene.shifts[scene.shifts.length - 1][1];
+    var hasCheckinToday = (w.todayLog || []).some(function(ev) { return ev.type === 'checkin'; });
+    if (nowHour >= lastEnd && w.lastSettledDate !== todayStr && hasCheckinToday) {
+      settleDailyWage(w);
+    }
+
+    // 5. 每 20 分钟检测事件（只在工作时段内）
+    if (w.isWorking) {
+      if (!w.lastEventCheck) w.lastEventCheck = nowTs;
+      if (nowTs - w.lastEventCheck >= 20 * 60 * 1000) {
+        w.lastEventCheck = nowTs;
+        triggerWorkEvent(w, scene, now);
+      }
+    } else {
+      w.lastEventCheck = nowTs;
+    }
+  });
+
+  renderWorkCards();
+  saveState();
+}
+
+function triggerWorkEvent(w, scene, now) {
+  var r = Math.random();
+  var hour = now.getHours();
+  var min = now.getMinutes();
+  var mood = w.mood;
+
+  // 心情 ≤ 70% 时，扣钱概率从 2% 升到 7%（原2% + 5%）
+  var penaltyRate = (mood <= 70) ? 0.07 : 0.02;
+  var bonusRate = 0.03;
+  var customerRate = 0.04;
+  var fishRate = (mood <= 70) ? 0.15 : 0.05;
+  var quitRate = 0.007;
+  if (mood <= 15) quitRate = 0.03;
+  if (mood === 0) quitRate = 1;
+
+  var cursor = 0;
+
+  // 1. 遇到客人
+  cursor += customerRate;
+  if (r < cursor) {
+    enqueueWorkCustomerEvent(w.id);
+    return;
+  }
+
+  // 2. 扣钱
+  cursor += penaltyRate;
+  if (r < cursor) {
+    var p = WORK_PENALTIES[Math.floor(Math.random() * WORK_PENALTIES.length)];
+    w.todayLog.push({
+      hour: hour, min: min,
+      text: '因「' + p.reason + '」被扣 ' + p.amount + ' 元',
+      type: 'penalty',
+      amount: p.amount
+    });
+    w.todayEarnings -= p.amount;
+    var drop = 3 + Math.floor(Math.random() * 13); // 3~15
+    w.mood = Math.max(0, w.mood - drop);
+    saveState();
+    return;
+  }
+
+  // 3. 奖金
+  cursor += bonusRate;
+  if (r < cursor) {
+    var b = pickRandomBonus();
+    w.todayLog.push({
+      hour: hour, min: min,
+      text: '获得「' + b.reason + '」奖金 ' + b.amount + ' 元',
+      type: 'bonus',
+      amount: b.amount
+    });
+    w.todayEarnings += b.amount;
+    var up = 3 + Math.floor(Math.random() * 13); // 3~15
+    w.mood = Math.min(100, w.mood + up);
+    saveState();
+    return;
+  }
+
+  // 4. 摸鱼
+  cursor += fishRate;
+  if (r < cursor) {
+    w.todayLog.push({
+      hour: hour, min: min,
+      text: '偷偷摸了一会鱼',
+      type: 'fish'
+    });
+    // 摸鱼被发现 3%
+    if (Math.random() < 0.03) {
+      var fmin = min + 1;
+      var fhour = hour;
+      if (fmin >= 60) { fmin -= 60; fhour += 1; }
+      w.todayLog.push({
+        hour: fhour, min: fmin,
+        text: '摸鱼被老板发现，被扣 3 元',
+        type: 'penalty',
+        amount: 3
+      });
+      w.todayEarnings -= 3;
+    }
+    saveState();
+    return;
+  }
+
+  // 5. 辞职
+  cursor += quitRate;
+  if (r < cursor) {
+    w.active = false;
+    w.isWorking = false;
+    w.todayLog.push({
+      hour: hour, min: min,
+      text: '辞职了',
+      type: 'quit'
+    });
+    saveState();
+    renderWorkCards();
+    return;
+  }
+}
+
+// ===== 打工系统 · 遇到客人弹窗 =====
+var workCustomerQueue = [];       // 排队
+var workCustomerCurrent = null;   // 当前正在弹的 { workId }
+
+function enqueueWorkCustomerEvent(workId) {
+  workCustomerQueue.push(workId);
+  tryShowNextCustomerEvent();
+}
+
+function tryShowNextCustomerEvent() {
+  if (workCustomerCurrent) return; // 已经在弹了
+  if (workCustomerQueue.length === 0) return;
+
+  var workId = workCustomerQueue.shift();
+  var w = state.workShifts.find(function(x) { return x.id === workId; });
+  if (!w || !w.active) {
+    // 记录已失效，直接下一个
+    setTimeout(tryShowNextCustomerEvent, 100);
+    return;
+  }
+
+  workCustomerCurrent = { workId: workId };
+
+  document.getElementById('wcTitle').textContent = '⚠️ 遇到麻烦了';
+  document.getElementById('wcBody').textContent = '「' + w.dreamName + '」在工作时遇到了胡搅蛮缠的客人，请求你的帮助';
+  document.getElementById('wcBody').style.display = 'block';
+  document.getElementById('wcSpin').style.display = 'none';
+  document.getElementById('wcBtns').style.display = 'flex';
+  document.getElementById('wcConfirm').style.display = 'none';
+  document.getElementById('workCustomerModal').style.display = 'flex';
+}
+
+function workCustomerIgnore() {
+  if (!workCustomerCurrent) return;
+  var w = state.workShifts.find(function(x) { return x.id === workCustomerCurrent.workId; });
+  if (w) {
+    var drop = 3 + Math.floor(Math.random() * 13); // 3~15
+    w.mood = Math.max(0, w.mood - drop);
+    var now = new Date();
+    w.todayLog.push({
+      hour: now.getHours(), min: now.getMinutes(),
+      text: '遇到刁难客人，未处理，心情值 -' + drop + '%',
+      type: 'customer_ignore'
+    });
+    saveState();
+    renderWorkCards();
+    showToast('「' + w.dreamName + '」心情值 -' + drop + '%');
+  }
+  closeWorkCustomerModal();
+}
+
+function workCustomerHelp() {
+  if (!workCustomerCurrent) return;
+  var w = state.workShifts.find(function(x) { return x.id === workCustomerCurrent.workId; });
+  if (!w) { closeWorkCustomerModal(); return; }
+
+  // 进入转圈状态
+  document.getElementById('wcTitle').textContent = '💬 正在争辩';
+  document.getElementById('wcBody').style.display = 'none';
+  document.getElementById('wcSpin').style.display = 'block';
+  document.getElementById('wcBtns').style.display = 'none';
+
+  // 3-8 秒后出结果
+  var duration = 3000 + Math.random() * 5000;
+  setTimeout(function() {
+    var win = Math.random() < 0.6;
+    var now = new Date();
+    if (win) {
+      document.getElementById('wcTitle').textContent = '🎉 赢了';
+      document.getElementById('wcBody').textContent = '客人被你怼得哑口无言，离开了' + w.sceneName;
+      w.todayLog.push({
+        hour: now.getHours(), min: now.getMinutes(),
+        text: '帮梦角吵赢了客人',
+        type: 'customer_win'
+      });
+    } else {
+      var drop = 3 + Math.floor(Math.random() * 13); // 3~15
+      w.mood = Math.max(0, w.mood - drop);
+      document.getElementById('wcTitle').textContent = '😞 吵输了';
+      document.getElementById('wcBody').innerHTML = '客人再次胡搅蛮缠，争辩失败<br><span style="font-size:12px;color:#ff3b30;">' + w.dreamName + ' 心情值 -' + drop + '%</span>';
+      w.todayLog.push({
+        hour: now.getHours(), min: now.getMinutes(),
+        text: '帮梦角吵架失败，心情值 -' + drop + '%',
+        type: 'customer_lose'
+      });
+    }
+    saveState();
+    document.getElementById('wcBody').style.display = 'block';
+    document.getElementById('wcSpin').style.display = 'none';
+    document.getElementById('wcConfirm').style.display = 'block';
+    renderWorkCards();
+  }, duration);
+}
+
+function workCustomerConfirm() {
+  closeWorkCustomerModal();
+}
+
+function closeWorkCustomerModal() {
+  document.getElementById('workCustomerModal').style.display = 'none';
+  workCustomerCurrent = null;
+  // 处理下一个排队中的事件
+  setTimeout(tryShowNextCustomerEvent, 300);
+}
+
+// ===== 打工系统 · 每日结算 =====
+function settleDailyWage(w) {
+  var scene = getWorkScene(w.sceneId);
+  if (!scene) return;
+
+  var total;
+  if (w.hasLeaveToday) {
+    total = 0;
+  } else {
+    var hours = getSceneDailyHours(scene);
+    var baseWage = hours * scene.hourlyWage;
+    total = baseWage + (w.todayEarnings || 0);
+  }
+  total = Math.round(total * 100) / 100;
+
+  var displayText = '';
+
+  // 处理欠债
+  if (w.debt > 0 && total > 0) {
+    var payDebt = Math.min(total, w.debt);
+    w.debt = Math.round((w.debt - payDebt) * 100) / 100;
+    total = Math.round((total - payDebt) * 100) / 100;
+    displayText = '今日工资 +' + (total + payDebt).toFixed(2) + '，扣欠债 ' + payDebt.toFixed(2) + '，实收 +' + total.toFixed(2);
+  } else if (total >= 0) {
+    displayText = '今日工资 +' + total.toFixed(2) + ' 元';
+  } else {
+    displayText = '今日工资 ' + total.toFixed(2) + ' 元';
+  }
+
+  // 工资进/扣金库
+  if (total > 0) {
+    addDreamBalance(w.dreamId, total);
+  } else if (total < 0) {
+    var balance = getDreamBalance(w.dreamId);
+    var need = Math.abs(total);
+    if (balance >= need) {
+      setDreamBalance(w.dreamId, balance - need);
+    } else {
+      // 金库不够，剩下的变成欠债
+      var remain = need - balance;
+      setDreamBalance(w.dreamId, 0);
+      w.debt = Math.round((w.debt + remain) * 100) / 100;
+      displayText += '（金库不足，欠债 ' + w.debt.toFixed(2) + ' 元）';
+    }
+  }
+
+  w.todayLog.push({
+    hour: new Date().getHours(),
+    min: new Date().getMinutes(),
+    text: displayText,
+    type: 'settle'
+  });
+
+  w.todaySettledAmount = total;
+  w.lastSettledDate = w.todayDate;
+  saveState();
+  renderWorkCards();
+}
+
+// ===== 打工系统 · 跨天重置 =====
+function dailyResetWork(w, todayStr) {
+  w.todayDate = todayStr;
+  w.todayLog = [];
+  w.todayEarnings = 0;
+  w.todaySettledAmount = null;
+  w.hasLateToday = false;
+  w.hasLeaveToday = false;
+  w.lateLogged = false;
+  w.isWorking = false;
+  w.lastEventCheck = Date.now();
+
+  // 心情值刷新到 60%~100%
+  w.mood = 60 + Math.floor(Math.random() * 41);
+
+  // 判断今天是否请假（1%）
+  if (Math.random() < 0.01) {
+    w.hasLeaveToday = true;
+    w.todayLog.push({ hour: 0, min: 0, text: '今日请假', type: 'leave' });
+  } else if (Math.random() < 0.05) {
+    w.hasLateToday = true;
+  }
+  saveState();
+}
+
+// ===== 小助手 · 主面板 =====
+function openAssistantPanel() {
+  document.getElementById('actionMenuPanel').style.display = 'none';
+  document.getElementById('assistantModal').style.display = 'flex';
+}
+
+function closeAssistantModal() {
+  document.getElementById('assistantModal').style.display = 'none';
+}
+
+// ===== 小助手 · 举报顶号 =====
+function openReportPanel() {
+  closeAssistantModal();
+  if (!state.dreams || state.dreams.length < 2) {
+    showToast('梦角不足 2 个，无法举报顶号');
+    return;
+  }
+  var topSel = document.getElementById('reportTopSelect');
+  var victimSel = document.getElementById('reportVictimSelect');
+  var opts = state.dreams.map(function(d) {
+    return '<option value="' + d.id + '">' + d.name + '</option>';
+  }).join('');
+  topSel.innerHTML = opts;
+  victimSel.innerHTML = opts;
+  topSel.selectedIndex = 0;
+  victimSel.selectedIndex = Math.min(1, state.dreams.length - 1);
+  document.getElementById('reportModal').style.display = 'flex';
+}
+
+function closeReportPanel() {
+  document.getElementById('reportModal').style.display = 'none';
+}
+
+function submitReport() {
+  var topId = document.getElementById('reportTopSelect').value;
+  var victimId = document.getElementById('reportVictimSelect').value;
+
+  if (!topId || !victimId) { showToast('请选择梦角'); return; }
+  if (topId === victimId) { showToast('顶号者和被顶号者不能是同一个人'); return; }
+
+  var top = state.dreams.find(function(d) { return d.id === topId; });
+  var victim = state.dreams.find(function(d) { return d.id === victimId; });
+  if (!top || !victim) return;
+
+  var now = Date.now();
+  var until = now + 5 * 60 * 1000;
+
+  // 封禁被顶号者
+  state.bannedDreams = (state.bannedDreams || []).filter(function(x) { return x.dreamId !== victimId; });
+   state.bannedDreams.push({ dreamId: victimId, until: until, startAt: now });
+  // 顶号者强制道歉
+  state.apologizingDreams = (state.apologizingDreams || []).filter(function(x) { return x.dreamId !== topId; });
+  state.apologizingDreams.push({ dreamId: topId, until: until, startAt: now });
+
+  // 在聊天界面加通知面板
+  var chatId = state.currentChatId;
+  if (chatId) {
+    var myName = state.profile.name || '我';
+    if (!state.chatSessions[chatId]) state.chatSessions[chatId] = [];
+    state.chatSessions[chatId].push({
+      from: 'system',
+      type: 'report_notice',
+      text: '「' + myName + '」举报了「' + top.name + '」的顶号行为\n违规顶号者：' + top.name + '\n被顶号者：' + victim.name + '\n处罚开始',
+      time: now
+    });
+    saveState();
+    loadChatMessages();
+    renderChatMessages();
+  }
+
+  saveState();
+  closeReportPanel();
+  showToast('举报成功，「' + victim.name + '」已被封禁 5 分钟');
+}
+
+// ===== 小助手 · 外挂 =====
+function openCheatPanel() {
+  closeAssistantModal();
+  if (!state.currentChatId || !state.currentChatId.startsWith('group_')) {
+    showToast('外挂只能用于群聊模式');
+    return;
+  }
+  var today = new Date().toISOString().slice(0, 10);
+  if (!state.cheatUsage || state.cheatUsage.date !== today) {
+    state.cheatUsage = { date: today, unbanGroups: [], seizeGroups: [] };
+    saveState();
+  }
+  var gid = state.currentChatId;
+  var unbanUsed = state.cheatUsage.unbanGroups.indexOf(gid) > -1;
+  var seizeUsed = state.cheatUsage.seizeGroups.indexOf(gid) > -1;
+  document.getElementById('cheatUnbanHint').textContent = unbanUsed ? '今日已在本群使用' : '每天一次';
+  document.getElementById('cheatSeizeHint').textContent = seizeUsed ? '今日已在本群使用' : '每天一次';
+  document.getElementById('cheatModal').style.display = 'flex';
+}
+
+function closeCheatPanel() {
+  document.getElementById('cheatModal').style.display = 'none';
+}
+
+function cheatUnbanSelf() {
+  if (!state.currentChatId || !state.currentChatId.startsWith('group_')) return;
+  var today = new Date().toISOString().slice(0, 10);
+  if (!state.cheatUsage || state.cheatUsage.date !== today) {
+    state.cheatUsage = { date: today, unbanGroups: [], seizeGroups: [] };
+  }
+  var gid = state.currentChatId;
+  if (state.cheatUsage.unbanGroups.indexOf(gid) > -1) { showToast('今日已在本群使用过'); return; }
+
+  var g = state.groups.find(function(x) { return x.id === gid; });
+  if (!g) return;
+  if (!g.muteEndsAt || g.muteEndsAt['user'] === undefined) { showToast('你当前没有被禁言'); return; }
+
+  delete g.muteEndsAt['user'];
+  state.cheatUsage.unbanGroups.push(gid);
+
+  var myName = state.profile.name || '我';
+  if (!state.chatSessions[gid]) state.chatSessions[gid] = [];
+  state.chatSessions[gid].push({ from: 'system', text: '「' + myName + '」利用外挂解除了自己的禁言！', time: Date.now() });
+  saveState();
+  loadChatMessages();
+  renderChatMessages();
+  closeCheatPanel();
+  showToast('已解除禁言');
+}
+
+function cheatSeizeOwner() {
+  if (!state.currentChatId || !state.currentChatId.startsWith('group_')) return;
+  var today = new Date().toISOString().slice(0, 10);
+  if (!state.cheatUsage || state.cheatUsage.date !== today) {
+    state.cheatUsage = { date: today, unbanGroups: [], seizeGroups: [] };
+  }
+  var gid = state.currentChatId;
+  if (state.cheatUsage.seizeGroups.indexOf(gid) > -1) { showToast('今日已在本群使用过'); return; }
+
+  var g = state.groups.find(function(x) { return x.id === gid; });
+  if (!g) return;
+  if (g.ownerId === 'user') { showToast('你已经是群主了'); return; }
+
+  g.ownerId = 'user';
+  state.cheatUsage.seizeGroups.push(gid);
+
+  var myName = state.profile.name || '我';
+  if (!state.chatSessions[gid]) state.chatSessions[gid] = [];
+  state.chatSessions[gid].push({ from: 'system', text: '「' + myName + '」利用外挂夺回了群主！', time: Date.now() });
+  saveState();
+  loadChatMessages();
+  renderChatMessages();
+  closeCheatPanel();
+  showToast('已夺回群主');
+}
+
+// ===== 小助手 · 状态查询 =====
+var APOLOGY_PHRASES = ['我错了', '我再也不顶号了', '下次再也不犯了', '对不起，是我不对', '我保证这是最后一次'];
+
+function pickApology() {
+  return APOLOGY_PHRASES[Math.floor(Math.random() * APOLOGY_PHRASES.length)];
+}
+
+function getDreamBanStatus(dreamId, msgTime) {
+  if (!dreamId) return 'normal';
+  var t = msgTime || Date.now();
+
+  // 找该梦角所有封禁记录
+  var bans = (state.bannedDreams || []).filter(function(x) { return x.dreamId === dreamId; });
+  for (var i = 0; i < bans.length; i++) {
+    var x = bans[i];
+    // 消息发送时间落在处罚期间内 → 永久显示为封禁
+    if (t >= (x.startAt || 0) && t <= x.until) return 'banned';
+  }
+
+  var apolos = (state.apologizingDreams || []).filter(function(x) { return x.dreamId === dreamId; });
+  for (var j = 0; j < apolos.length; j++) {
+    var y = apolos[j];
+    if (t >= (y.startAt || 0) && t <= y.until) return 'apologizing';
+  }
+
+  return 'normal';
+}
+
+// ===== 小助手 · 处罚到期检测 =====
+function checkAssistantExpiry() {
+  var now = Date.now();
+  var changed = false;
+
+  // 检查封禁
+  (state.bannedDreams || []).forEach(function(x) {
+    if (x.until <= now && !x.notified) {
+      x.notified = true;
+      changed = true;
+      var victim = state.dreams.find(function(d) { return d.id === x.dreamId; });
+      if (victim) {
+        var notice = '对「' + victim.name + '」的封禁已结束，账号恢复正常';
+        Object.keys(state.chatSessions || {}).forEach(function(cid) {
+          var inPrivate = (cid === victim.id);
+          var g = state.groups.find(function(g) { return g.id === cid; });
+          var inGroup = g && g.memberIds.indexOf(victim.id) > -1;
+          if (inPrivate || inGroup) {
+            state.chatSessions[cid].push({ from: 'system', text: notice, time: now });
+          }
+        });
+      }
+    }
+  });
+
+  // 检查强制道歉
+  (state.apologizingDreams || []).forEach(function(x) {
+    if (x.until <= now && !x.notified) {
+      x.notified = true;
+      changed = true;
+      var top = state.dreams.find(function(d) { return d.id === x.dreamId; });
+      if (top) {
+        var notice2 = '对「' + top.name + '」的强制道歉已结束，账号恢复正常';
+        Object.keys(state.chatSessions || {}).forEach(function(cid) {
+          var inPrivate = (cid === top.id);
+          var g = state.groups.find(function(g) { return g.id === cid; });
+          var inGroup = g && g.memberIds.indexOf(top.id) > -1;
+          if (inPrivate || inGroup) {
+            state.chatSessions[cid].push({ from: 'system', text: notice2, time: now });
+          }
+        });
+      }
+    }
+  });
+
+  if (changed) {
+    saveState();
+    if (state.currentChatId) {
+      loadChatMessages();
+      renderChatMessages();
+    }
+  }
+}
+
+// ===== 音乐功能 · 本地导入 =====
+function renderMusicList() {
+  var container = document.getElementById('musicListContainer');
+  if (!container) return;
+  var songs = state.musicLibrary.songs || [];
+  if (songs.length === 0) {
+    container.innerHTML = '<div style="padding:60px 20px;text-align:center;color:#86868b;font-size:14px;">还没有音乐，点右上角 + 导入吧</div>';
+    return;
+  }
+  var html = '';
+  songs.forEach(function(song, idx) {
+    html += '<div onclick="playMusic(' + idx + ')" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;">';
+    html += '<span style="font-size:13px;color:#86868b;width:20px;text-align:center;">' + (idx + 1) + '</span>';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-size:14px;font-weight:500;color:#1d1d1f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (song.title || song.fileName) + '</div>';
+    html += '<div style="font-size:12px;color:#86868b;margin-top:2px;">' + (song.artist || '未知艺术家') + '</div>';
+    html += '</div>';
+    html += '<span style="font-size:12px;color:#c7c7cc;">' + (song.duration ? formatMinSec(song.duration) : '--:--') + '</span>';
+    html += '<span onclick="event.stopPropagation();deleteMusic(' + idx + ')" style="font-size:16px;color:#ff3b30;padding:6px 10px;cursor:pointer;user-select:none;">🗑</span>';
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function deleteMusic(idx) {
+  var songs = state.musicLibrary.songs || [];
+  if (idx < 0 || idx >= songs.length) return;
+  var song = songs[idx];
+  if (!confirm('确定删除「' + (song.title || song.fileName) + '」吗？')) return;
+
+  songs.splice(idx, 1);
+
+  // 处理正在播放的情况
+  if (currentMusicIndex === idx) {
+    // 删的就是当前播放的 → 停止
+    musicPlayer.pause();
+    musicPlayer.removeAttribute('src');
+    musicPlayer.load();
+    currentMusicIndex = -1;
+    var ball = document.getElementById('musicBall');
+    if (ball) ball.style.display = 'none';
+    var panel = document.getElementById('musicPanel');
+    if (panel) panel.style.display = 'none';
+  } else if (currentMusicIndex > idx) {
+    // 删的在当前播放的前面 → 索引前移 1
+    currentMusicIndex--;
+  }
+
+  saveState();
+  renderMusicList();
+  showToast('已删除');
+}
+
+function openMusicImport() {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'audio/*';
+  input.multiple = true;
+  input.onchange = function(e) {
+    var files = e.target.files;
+    if (!files || files.length === 0) return;
+    var loaded = 0;
+    var total = files.length;
+    for (var i = 0; i < files.length; i++) {
+      (function(file) {
+        var reader = new FileReader();
+        reader.onload = function(ev) {
+          var audio = new Audio();
+          audio.src = ev.target.result;
+          audio.addEventListener('loadedmetadata', function() {
+            var song = {
+              id: 'song_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+              fileName: file.name,
+              title: file.name.replace(/\.[^.]+$/, ''),
+              artist: '未知艺术家',
+              duration: Math.floor(audio.duration) || 0,
+              dataUrl: ev.target.result,
+              addedAt: Date.now()
+            };
+            state.musicLibrary.songs.push(song);
+            loaded++;
+            if (loaded === total) {
+              saveState();
+              renderMusicList();
+              showToast('成功导入 ' + total + ' 首音乐');
+            }
+          });
+        };
+        reader.readAsDataURL(file);
+      })(files[i]);
+    }
+  };
+  input.click();
+}
+
+// ===== 音乐功能 · 播放器 =====
+var musicPlayer = new Audio();
+var currentMusicIndex = -1;
+musicPlayer.addEventListener('timeupdate', function() {
+  updateMusicBar();
+});
+musicPlayer.addEventListener('loadedmetadata', function() {
+  updateMusicBar();
+});
+musicPlayer.addEventListener('ended', function() {
+  nextMusic();
+});
+musicPlayer.addEventListener('play', function() {
+  var btn = document.getElementById('musicBarPlayBtn');
+  if (btn) btn.textContent = '⏸';
+  updateMusicBar();
+});
+musicPlayer.addEventListener('pause', function() {
+  var btn = document.getElementById('musicBarPlayBtn');
+  if (btn) btn.textContent = '▶';
+});
+
+setTimeout(function() {
+  var ball = document.getElementById('musicBall');
+  if (ball) ball.style.display = 'none';
+  var panel = document.getElementById('musicPanel');
+  if (panel) panel.style.display = 'none';
+}, 100);
+
+function playMusic(idx) {
+  var songs = state.musicLibrary.songs || [];
+  if (idx < 0 || idx >= songs.length) return;
+  currentMusicIndex = idx;
+  musicPlayer.src = songs[idx].dataUrl;
+  // 立刻刷新一次，把歌名和时长填上
+  updateMusicBar();
+  document.getElementById('musicBall').style.display = 'none';
+  document.getElementById('musicPanel').style.display = 'block';
+  musicPlayer.play().then(function() {
+    updateMusicBar();
+  }).catch(function(e) {
+    showToast('播放失败：' + e.message);
+  });
+}
+
+function showMusicBall() {
+  document.getElementById('musicBall').style.display = 'flex';
+}
+
+function expandMusicPanel() {
+  document.getElementById('musicBall').style.display = 'none';
+  document.getElementById('musicPanel').style.display = 'block';
+  updateMusicBar();
+}
+
+function collapseMusicPanel() {
+  document.getElementById('musicPanel').style.display = 'none';
+  document.getElementById('musicBall').style.display = 'flex';
+}
+
+function togglePlayMusic() {
+  if (!musicPlayer.src) return;
+  if (musicPlayer.paused) {
+    musicPlayer.play();
+    updateMusicBar();
+  } else {
+    musicPlayer.pause();
+    updateMusicBar();
+  }
+}
+
+function updateMusicBar() {
+  var songs = state.musicLibrary.songs || [];
+  if (currentMusicIndex < 0 || currentMusicIndex >= songs.length) {
+    var ball = document.getElementById('musicBall');
+    if (ball) ball.style.display = 'none';
+    var panel = document.getElementById('musicPanel');
+    if (panel) panel.style.display = 'none';
+    return;
+  }
+  var s = songs[currentMusicIndex];
+  var titleEl = document.getElementById('musicBarTitle');
+  var artistEl = document.getElementById('musicBarArtist');
+  if (titleEl) titleEl.textContent = s.title || s.fileName || '未命名';
+  if (artistEl) artistEl.textContent = s.artist || '未知艺术家';
+  var playBtn = document.getElementById('musicBarPlayBtn');
+  if (playBtn) playBtn.textContent = musicPlayer.paused ? '▶' : '⏸';
+
+  var cur = musicPlayer.currentTime || 0;
+  // 【修复】duration 优先从歌曲元数据读，避免加载延迟
+  var dur = musicPlayer.duration;
+  if (!dur || isNaN(dur) || dur === Infinity) {
+    dur = s.duration || 0;
+  }
+  var curEl = document.getElementById('musicBarCurrent');
+  var durEl = document.getElementById('musicBarDuration');
+  if (curEl) curEl.textContent = formatMinSec(cur);
+  if (durEl) durEl.textContent = formatMinSec(dur);
+  var prog = document.getElementById('musicBarProgress');
+  if (prog && dur > 0) prog.value = (cur / dur) * 100;
+
+  var innerProg = document.getElementById('musicBallProgressInner');
+  if (innerProg && dur > 0) innerProg.style.width = ((cur / dur) * 100) + '%';
+}
+
+function formatMinSec(sec) {
+  sec = Math.floor(sec) || 0;
+  var m = Math.floor(sec / 60);
+  var s = sec % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function stopMusic() {
+  musicPlayer.pause();
+  musicPlayer.currentTime = 0;
+  currentMusicIndex = -1;
+  document.getElementById('musicBall').style.display = 'none';
+  document.getElementById('musicPanel').style.display = 'none';
+}
+
+function nextMusic() {
+  var songs = state.musicLibrary.songs || [];
+  if (songs.length === 0) return;
+  currentMusicIndex = (currentMusicIndex + 1) % songs.length;
+  playMusic(currentMusicIndex);
+}
+
+function prevMusic() {
+  var songs = state.musicLibrary.songs || [];
+  if (songs.length === 0) return;
+  currentMusicIndex = (currentMusicIndex - 1 + songs.length) % songs.length;
+  playMusic(currentMusicIndex);
+}
+
+// 进度条拖动
+document.addEventListener('input', function(e) {
+  if (e.target && e.target.id === 'musicBarProgress') {
+    var dur = musicPlayer.duration || 0;
+    if (dur > 0) {
+      musicPlayer.currentTime = (e.target.value / 100) * dur;
+    }
+  }
+  });
+
+  // ===== 音乐悬浮球 · 点击展开 + 拖拽 =====
+(function bindMusicBall() {
+  var ball = document.getElementById('musicBall');
+  if (!ball) { setTimeout(bindMusicBall, 300); return; }
+  if (ball._bound) return;
+  ball._bound = true;
+
+  var isDragging = false;
+  var moved = false;
+  var startX = 0, startY = 0;
+  var startLeft = 0, startTop = 0;
+  var phone = document.querySelector('.phone');
+  var lastDragTime = 0;
+
+  function onStart(e) {
+    var cx = e.touches ? e.touches[0].clientX : e.clientX;
+    var cy = e.touches ? e.touches[0].clientY : e.clientY;
+    var phoneRect = phone.getBoundingClientRect();
+    var ballRect = ball.getBoundingClientRect();
+    startX = cx;
+    startY = cy;
+    startLeft = ballRect.left - phoneRect.left;
+    startTop = ballRect.top - phoneRect.top;
+    moved = false;
+    isDragging = true;
+    ball.style.right = 'auto';
+    ball.style.bottom = 'auto';
+    ball.style.left = startLeft + 'px';
+    ball.style.top = startTop + 'px';
+    ball.classList.add('dragging');
+  }
+
+  function onMove(e) {
+    if (!isDragging) return;
+    var cx = e.touches ? e.touches[0].clientX : e.clientX;
+    var cy = e.touches ? e.touches[0].clientY : e.clientY;
+    var dx = cx - startX;
+    var dy = cy - startY;
+    // 阈值改成 15px，避免误判
+    if (Math.abs(dx) > 15 || Math.abs(dy) > 15) moved = true;
+    if (!moved) return;
+    if (e.cancelable) e.preventDefault();
+    var phoneRect = phone.getBoundingClientRect();
+    var newLeft = startLeft + dx;
+    var newTop = startTop + dy;
+    newLeft = Math.max(4, Math.min(newLeft, phoneRect.width - ball.offsetWidth - 4));
+    newTop = Math.max(4, Math.min(newTop, phoneRect.height - ball.offsetHeight - 4));
+    ball.style.left = newLeft + 'px';
+    ball.style.top = newTop + 'px';
+  }
+
+  function onEnd(e) {
+    if (!isDragging) return;
+    isDragging = false;
+    ball.classList.remove('dragging');
+
+    if (moved) {
+      // 拖拽过 → 吸附到左右边
+      var phoneRect = phone.getBoundingClientRect();
+      var curLeft = parseFloat(ball.style.left) || 0;
+      var curTop = parseFloat(ball.style.top) || 0;
+      var snapLeft = (curLeft + ball.offsetWidth / 2 < phoneRect.width / 2)
+        ? 20
+        : (phoneRect.width - ball.offsetWidth - 20);
+      ball.style.left = snapLeft + 'px';
+      ball.style.top = curTop + 'px';
+      lastDragTime = Date.now();
+    } else {
+      // 纯点击 → 打开面板
+      expandMusicPanel();
+    }
+  }
+
+  ball.addEventListener('touchstart', onStart, { passive: true });
+  ball.addEventListener('touchmove', onMove, { passive: false });
+  ball.addEventListener('touchend', onEnd);
+  ball.addEventListener('touchcancel', onEnd);
+  ball.addEventListener('mousedown', onStart);
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onEnd);
+})();
