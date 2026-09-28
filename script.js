@@ -7853,7 +7853,7 @@ function triggerWorkEvent(w, scene, now) {
   // 心情 ≤ 70% 时，扣钱概率从 2% 升到 7%（原2% + 5%）
   var penaltyRate = (mood <= 70) ? 0.07 : 0.02;
   var bonusRate = 0.03;
-  var customerRate = 0.04;
+  var customerRate = 0.01;
   var fishRate = (mood <= 70) ? 0.15 : 0.05;
   var quitRate = 0.007;
   if (mood <= 15) quitRate = 0.03;
