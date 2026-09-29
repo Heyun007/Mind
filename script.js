@@ -7823,7 +7823,15 @@ if (inShift && !w.isWorking) {
   }
   saveState();
 } else if (!inShift && w.isWorking) {
-  // ... 下班逻辑不变
+  // 下班逻辑（这是原本的代码，必须留着！）
+  w.isWorking = false;
+  w.todayLog.push({
+    hour: nowHour, min: nowMin,
+    text: '下班休息',
+    type: 'checkout'
+  });
+  saveState();
+}
 
     // 4. 到了最后下班时间，且今天还没结算 → 结算
     var lastEnd = scene.shifts[scene.shifts.length - 1][1];
