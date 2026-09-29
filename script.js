@@ -7792,7 +7792,7 @@ if (inShift && !w.isWorking) {
   
   // 【新增逻辑】：判断是不是“上线补录”
   var shiftStartHour = scene.shifts[0][0];
-  var isCatchUp = (nowHour > shiftStartHour);
+  var isCatchUp = (nowHour > shiftStartHour) || (nowHour === shiftStartHour && nowMin > 0);
   var recordHour = isCatchUp ? shiftStartHour : nowHour;
   var recordMin = isCatchUp ? 0 : nowMin;
   
