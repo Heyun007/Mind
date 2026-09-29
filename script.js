@@ -7787,39 +7787,43 @@ function tickWorkSystem() {
     var inShift = isSceneWorkingAt(scene, now);
 
     // 3. 上/下班切换
-    if (inShift && !w.isWorking) {
-      w.isWorking = true;
-      if (w.hasLateToday && !w.lateLogged) {
-        w.lateLogged = true;
-        w.todayEarnings -= 5;
-        w.todayLog.push({
-          hour: nowHour, min: nowMin,
-          text: '迟到，' + fmtHour(nowHour, nowMin) + ' 才到',
-          type: 'checkin'
-        });
-        w.todayLog.push({
-          hour: nowHour, min: nowMin,
-          text: '因「迟到」被扣 5 元',
-          type: 'penalty',
-          amount: 5
-        });
-      } else {
-        w.todayLog.push({
-          hour: nowHour, min: nowMin,
-          text: '开始上班',
-          type: 'checkin'
-        });
-      }
-      saveState();
-    } else if (!inShift && w.isWorking) {
-      w.isWorking = false;
-      w.todayLog.push({
-        hour: nowHour, min: nowMin,
-        text: '下班休息',
-        type: 'checkout'
-      });
-      saveState();
-    }
+if (inShift && !w.isWorking) {
+  w.isWorking = true;
+  
+  // 【新增逻辑】：判断是不是“上线补录”
+  var shiftStartHour = scene.shifts[0][0];
+  var isCatchUp = (nowHour > shiftStartHour);
+  var recordHour = isCatchUp ? shiftStartHour : nowHour;
+  var recordMin = isCatchUp ? 0 : nowMin;
+  
+  var checkinText = isCatchUp 
+    ? '开始上班（离线补录，原定 ' + fmtHour(shiftStartHour, 0) + ' 上班）' 
+    : '开始上班';
+
+  if (w.hasLateToday && !w.lateLogged) {
+    w.lateLogged = true;
+    w.todayEarnings -= 5;
+    w.todayLog.push({
+      hour: nowHour, min: nowMin,
+      text: '迟到，' + fmtHour(nowHour, nowMin) + ' 才到',
+      type: 'checkin'
+    });
+    w.todayLog.push({
+      hour: nowHour, min: nowMin,
+      text: '因「迟到」被扣 5 元',
+      type: 'penalty',
+      amount: 5
+    });
+  } else {
+    w.todayLog.push({
+      hour: recordHour, min: recordMin,
+      text: checkinText,
+      type: 'checkin'
+    });
+  }
+  saveState();
+} else if (!inShift && w.isWorking) {
+  // ... 下班逻辑不变
 
     // 4. 到了最后下班时间，且今天还没结算 → 结算
     var lastEnd = scene.shifts[scene.shifts.length - 1][1];
