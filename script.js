@@ -7842,12 +7842,22 @@ function tickWorkSystem() {
     // 2. 判断是否处于工作时段
     var inShift = isSceneWorkingAt(scene, now);
 
-    // 3. 上/下班切换
+  // 3. 上/下班切换
 if (inShift && !w.isWorking) {
   w.isWorking = true;
   
-  // 【新增逻辑】：判断是不是“上线补录”
-  var shiftStartHour = scene.shifts[0][0];
+  // 【核心修复】：找出当前时间对应的是今天哪一段班次，而不是死板地取第一段班
+  var currentShift = null;
+  for (var si = 0; si < scene.shifts.length; si++) {
+    var s = scene.shifts[si];
+    if (nowHour >= s[0] && nowHour < s[1]) {
+      currentShift = s;
+      break;
+    }
+  }
+  
+  // 如果找到了当前班次，就用当前班次的开始时间补录
+  var shiftStartHour = currentShift ? currentShift[0] : nowHour; 
   var isCatchUp = (nowHour > shiftStartHour) || (nowHour === shiftStartHour && nowMin > 0);
   var recordHour = isCatchUp ? shiftStartHour : nowHour;
   var recordMin = isCatchUp ? 0 : nowMin;
@@ -7879,7 +7889,7 @@ if (inShift && !w.isWorking) {
   }
   saveState();
 } else if (!inShift && w.isWorking) {
-  // 下班逻辑（这是原本的代码，必须留着！）
+  // 下班逻辑
   w.isWorking = false;
   w.todayLog.push({
     hour: nowHour, min: nowMin,
