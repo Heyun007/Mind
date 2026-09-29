@@ -277,6 +277,8 @@ async function init() {
   applyHomeBg();
     checkMailDelivery();
   setInterval(checkMailDelivery, 30000);
+  checkAutoLetter();
+setInterval(checkAutoLetter, 3 * 60 * 60 * 1000);
     checkRedPacketExpiry();
   setInterval(checkRedPacketExpiry, 5 * 60 * 1000);
     startWorkSystem();
@@ -4772,13 +4774,18 @@ function checkAutoDiary() {
   var today = new Date().toISOString().slice(0, 10);
 
   state.dreams.forEach(function(d) {
-    // 检查今天是否已经写过
-    var already = state.diaries.some(function(diary) {
-      if (diary.authorId !== d.id) return false;
-      var diaryDate = new Date(diary.time).toISOString().slice(0, 10);
-      return diaryDate === today;
-    });
-    if (already) return;
+    // 检查今天真实写了几篇，限制最多 2 篇
+var todayCount = state.diaries.filter(function(diary) {
+  if (diary.authorId !== d.id) return false;
+  // 【核心修复】：从日记 ID 中提取真实的生成时间戳 (格式: diary_时间戳_随机数)
+  var createdTs = parseInt((diary.id || '').split('_')[1]);
+  if (!createdTs || isNaN(createdTs)) {
+    createdTs = diary.time || Date.now(); // 兼容以前的老日记
+  }
+  var diaryDate = new Date(createdTs).toISOString().slice(0, 10);
+  return diaryDate === today;
+}).length;
+if (todayCount >= 2) return;
 
     // 每天有 20% 概率在扫描时触发（保证一天至少一篇，最多几篇）
     if (Math.random() > 0.2) return;
@@ -5452,6 +5459,7 @@ function renderMailList() {
     }
 
     var whoText = m.from === 'user' ? ('寄给 ' + m.toName) : ('来自 ' + m.fromName);
+if (m.isAutoLetter) whoText += ' <span style="font-size:10px;color:#ff9500;background:rgba(255,149,0,0.1);padding:1px 4px;border-radius:4px;margin-left:4px;font-weight:400;">主动来信</span>';
     var preview = m.content.replace(/\n/g, ' ').slice(0, 30);
 
     return '<div onclick="openLetterDetail(\'' + m.id + '\')" style="padding:14px 16px;border-bottom:1px solid var(--border);background:var(--card);cursor:pointer;position:relative;">' +
@@ -5489,6 +5497,7 @@ function openLetterDetail(id) {
   var timeStr = (t.getMonth()+1) + '月' + t.getDate() + '日 ' + String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0');
 
   document.getElementById('letterDetailTitle').textContent = m.from === 'user' ? '寄给 ' + m.toName : '来自 ' + m.fromName;
+if (m.isAutoLetter) document.getElementById('letterDetailTitle').textContent += ' · 主动来信';
   var html = '<div style="padding:20px;">';
   html += '<div style="font-size:12px;color:var(--gray);margin-bottom:16px;text-align:center;">' + timeStr + '</div>';
   html += '<div style="background:var(--card);border-radius:14px;padding:20px;box-shadow:0 2px 12px rgba(0,0,0,0.05);line-height:1.8;font-size:14px;color:var(--text);white-space:pre-wrap;word-break:break-word;">' + m.content + '</div>';
@@ -5499,6 +5508,53 @@ function openLetterDetail(id) {
   document.getElementById('letterDetailContent').innerHTML = html;
   navigateTo('pageLetterDetail');
   renderMailList();
+}
+
+function checkAutoLetter() {
+  if (!state.dreams || state.dreams.length === 0) return;
+  if (!state.cards || state.cards.length === 0) return;
+  if (!state.mails) state.mails = [];
+
+  // 4.5% 概率触发，想调大就改这里：0.0001 = 0.01%，0.01 = 1%，0.001 = 0.1%
+  if (Math.random() > 0.045) return;
+
+  // 随机挑一个梦角
+  var dream = state.dreams[Math.floor(Math.random() * state.dreams.length)];
+
+  // 从字卡库随机挑 8-15 条，组合成一封信
+  var count = 8 + Math.floor(Math.random() * 8);
+  var shuffled = state.cards.slice().sort(function() { return Math.random() - 0.5; });
+  var picked = shuffled.slice(0, Math.min(count, shuffled.length));
+  var content = picked.map(function(c) { return c.text; }).join('\n');
+
+  // 创建信件（立即送达）
+  state.mails.push({
+    id: 'mail_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    from: 'dream',
+    fromId: dream.id,
+    fromName: dream.name,
+    fromAvatar: dream.avatar || '',
+    toId: 'user',
+    toName: state.profile.name || '我',
+    content: content,
+    sentAt: Date.now(),
+    deliverAt: Date.now(),
+    delivered: true,
+    read: false,
+    isReply: false,
+    isAutoLetter: true
+  });
+
+  saveState();
+
+  // 如果你正在信箱页面，实时刷新列表
+  var mailboxPage = document.getElementById('pageMailbox');
+  if (mailboxPage && mailboxPage.classList.contains('active')) {
+    renderMailList();
+  }
+
+  // 弹通知
+  sendNotification(dream.name, '给你写了一封信');
 }
 
 // ===== 信箱定时：送达检查 + 梦角回信 =====
