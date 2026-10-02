@@ -88,11 +88,13 @@ const ICONS_CONFIG = [
 ];
 
 // ===== 1. 渲染主页图标 =====
-var APP_PER_PAGE = 12; // 每页 3×4
+var APP_PER_PAGE = 24; // 每页 4×6
+var MIN_APP_PAGES = 3; // 最少 3 页，第三页留空给用户自己拖
 
 function initAppPages() {
   var allKeys = ICONS_CONFIG.map(function(item) { return item.key; });
 
+  // 已有数据：校验 + 补齐槽位
   if (state.appPages && Array.isArray(state.appPages) && state.appPages.length > 0) {
     var existing = [];
     state.appPages.forEach(function(page) {
@@ -104,19 +106,34 @@ function initAppPages() {
     });
     var missing = allKeys.filter(function(k) { return existing.indexOf(k) === -1; });
 
-    if (missing.length === 0 && existing.length === allKeys.length) {
-      // 数据正常，保留用户排列
+    if (missing.length === 0 && existing.length === allKeys.length && state.appPages.length >= MIN_APP_PAGES) {
+      // 补齐每页长度到 APP_PER_PAGE，并补足页数
+      state.appPages.forEach(function(page) {
+        while (page.length < APP_PER_PAGE) page.push(null);
+      });
+      while (state.appPages.length < MIN_APP_PAGES) {
+        var blank = [];
+        for (var z = 0; z < APP_PER_PAGE; z++) blank.push(null);
+        state.appPages.push(blank);
+      }
       return;
     }
-
-    // 图标数量变了（比如新增了「表情包」），且每页容量变小了 → 重置为默认布局
+    // 数据对不上（新增了图标 / 页数不够），重置
     state.appPages = null;
   }
 
-  var keys = allKeys;
+  // 重新生成：第一页放全部图标，剩余页留空
+  var keys = allKeys.slice();
   var pages = [];
-  for (var i = 0; i < keys.length; i += APP_PER_PAGE) {
-    pages.push(keys.slice(i, i + APP_PER_PAGE));
+  var firstPage = keys.slice(0, APP_PER_PAGE);
+  while (firstPage.length < APP_PER_PAGE) firstPage.push(null);
+  pages.push(firstPage);
+
+  var totalPages = Math.max(MIN_APP_PAGES, Math.ceil(keys.length / APP_PER_PAGE));
+  for (var p = 1; p < totalPages; p++) {
+    var page = keys.slice(p * APP_PER_PAGE, (p + 1) * APP_PER_PAGE);
+    while (page.length < APP_PER_PAGE) page.push(null);
+    pages.push(page);
   }
   state.appPages = pages;
   saveState();
@@ -256,13 +273,17 @@ async function init() {
       { id: 'gift_3', name: '奶茶', price: 15 }
     ];
   }
-    state.dreams.forEach(function(d) { if (d.balance == null) d.balance = 0; });
+    state.dreams.forEach(function(d) {
+      if (d.balance == null) d.balance = 0;
+      if (!d.statuses || !Array.isArray(d.statuses)) d.statuses = [];
+      if (d.currentStatus === undefined) d.currentStatus = '';
+      if (d.statusUpdateAt === undefined) d.statusUpdateAt = 0;
+    });
   }
   loadChatMessages();
   renderChatMessages();
   renderAll();
   renderAppIcons();
-  renderAnniversaryWidget();
   bindAppDrag();
   renderIconSettings();  
   updateTime();
@@ -284,6 +305,7 @@ setInterval(checkAutoLetter, 3 * 60 * 60 * 1000);
     startWorkSystem();
       checkAssistantExpiry();
   setInterval(checkAssistantExpiry, 30000);
+  startDreamStatusTicker();
 }
 
 // ===== PERSISTENCE =====
@@ -421,7 +443,8 @@ function navigateTo(pageId) {
         if (pageId === 'pageMailbox') { switchMailTab('inbox'); renderMailList(); }
     if (pageId === 'pageWriteLetter') { /* 由 openWriteLetter 初始化 */ }
     if (pageId === 'pageFavorites') renderFavorites();
-    if (pageId === 'pageDiary') renderDiaryList();
+    if (pageId === 'pageDiary') { renderDiaryCover(); renderDiaryList(); }
+    if (pageId === 'pageIconSettings') renderIconSettings();
     if (pageId === 'pagePrivateChat') { loadChatMessages(); renderChat(); }
     if (pageId === 'pageCreateGroup') createGroupChat();
     if (pageId === 'pageGroupSettings') renderGroupSettings();
@@ -447,6 +470,7 @@ function handleProfileAvatar(e) {
     state.profile.avatar = ev.target.result;
     document.getElementById('profileAvatarPreview').src = ev.target.result;
     saveState();
+    try { renderDiaryCover(); } catch(e) {}
     showToast('头像已更新');
   };
   reader.readAsDataURL(file);
@@ -456,6 +480,7 @@ function saveProfile() {
   state.profile.name = document.getElementById('profileName').value || '我';
   state.profile.status = document.getElementById('profileStatus').value || '在线';
   saveState();
+  try { renderDiaryCover(); } catch(e) {}
   showToast('个人资料已保存');
 }
 
@@ -516,6 +541,7 @@ function openEditDreamRole(id) {
     document.getElementById('dreamAvatarPreview').src = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2780%27 height=%2780%27 viewBox=%270 0 80 80%27%3E%3Ccircle cx=%2740%27 cy=%2740%27 r=%2740%27 fill=%27%23ffe0e8%27/%3E%3Ctext x=%2740%27 y=%2744%27 text-anchor=%27middle%27 fill=%27%23d6336c%27 font-size=%2728%27%3E💜%3C/text%3E%3C/svg%3E';
   }
   
+  renderDreamStatusList();
   navigateTo('pageEditDreamRole');
 }
 
@@ -580,6 +606,10 @@ function deleteDreamRole() {
   if (!confirm('确定要删除这个梦角吗？聊天记录也会一并删除哦！')) return;
   
   state.dreams = state.dreams.filter(function(item) { return item.id !== state.currentEditDreamId; });
+    // 清理这个梦角的打工记录
+  if (state.workShifts && state.workShifts.length > 0) {
+    state.workShifts = state.workShifts.filter(function(w) { return w.dreamId !== state.currentEditDreamId; });
+  }
   state.currentEditDreamId = null;
   saveState();
   renderDreamRoles();
@@ -954,7 +984,7 @@ function renderCheckinHistory() {
     const timeStr = time.getMonth()+1 + '/' + time.getDate() + ' ' + String(time.getHours()).padStart(2,'0') + ':' + String(time.getMinutes()).padStart(2,'0');
     return `<div class="history-item">
       <div class="hi-left">
-        <div class="hi-main">${c.message || '查岗消息'}</div>
+       <div class="hi-main">${c.dreamName || '梦角'}：${c.message || '查岗消息'}</div>
         <div class="hi-time">${timeStr}</div>
       </div>
     </div>`;
@@ -1351,8 +1381,10 @@ function triggerCheckin() {
   document.getElementById('checkinOverlay').classList.add('active');
   
   const msgText = selected.map(c => c.text).join(' | ');
-  state.checkinHistory.push({
+    state.checkinHistory.push({
     id: state.nextCheckinId++,
+    dreamName: checker.name,
+    dreamId: checker.id,
     message: msgText.length > 50 ? msgText.slice(0,50) + '…' : msgText,
     timestamp: Date.now(),
     fullMessages: selected.map(c => c.text)
@@ -1680,6 +1712,64 @@ if (hasCards && hasStickers) {
   useSticker = true;
 }
 
+  // ===== 梦角主动引用用户消息（15% 概率） =====
+  var autoQuote = null;
+  if (state.settings && state.settings.dreamQuoteEnabled !== false && Math.random() < 0.15) {
+    var userMsgs = [];
+    for (var qi = chatMessages.length - 1; qi >= 0 && userMsgs.length < 5; qi--) {
+      if (chatMessages[qi] && chatMessages[qi].from === 'user') userMsgs.push(chatMessages[qi]);
+    }
+    if (userMsgs.length > 0) {
+      var picked = userMsgs[Math.floor(Math.random() * userMsgs.length)];
+      autoQuote = {
+        text: picked.text || '[表情]',
+        senderName: state.profile.name || '我',
+        msgId: -1
+      };
+    }
+  }
+
+  // ===== 梦角主动收藏用户消息（30% 概率） =====
+  if (Math.random() < 0.30) {
+    var userMsgs2 = [];
+    for (var fi = chatMessages.length - 1; fi >= 0 && userMsgs2.length < 5; fi--) {
+      if (chatMessages[fi] && chatMessages[fi].from === 'user') userMsgs2.push(chatMessages[fi]);
+    }
+    if (userMsgs2.length > 0) {
+      if (!state.favorites) state.favorites = [];
+      var pickedFav = userMsgs2[Math.floor(Math.random() * userMsgs2.length)];
+      var fromName = '梦角';
+      var fromId = 'dream';
+      if (isGroup && senderId) {
+        var senderD = state.dreams.find(function(d) { return d.id === senderId; });
+        if (senderD) { fromName = senderD.name; fromId = senderD.id; }
+      } else if (state.currentChatId) {
+        var senderD2 = state.dreams.find(function(d) { return d.id === state.currentChatId; });
+        if (senderD2) { fromName = senderD2.name; fromId = senderD2.id; }
+      }
+      var chatName2 = '';
+      if (isGroup) {
+        var gFav = state.groups.find(function(x) { return x.id === state.currentChatId; });
+        chatName2 = gFav ? ('群聊：' + gFav.name) : '';
+      } else {
+        var dFav = state.dreams.find(function(x) { return x.id === state.currentChatId; });
+        chatName2 = dFav ? ('私聊：' + dFav.name) : '';
+      }
+      state.favorites.push({
+        id: 'fav_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        text: pickedFav.text || '[表情]',
+        senderName: state.profile.name || '我',
+        isUser: true,
+        chatName: chatName2,
+        time: pickedFav.time,
+        addedAt: Date.now(),
+        favBy: fromName,
+        favById: fromId
+      });
+      saveState();
+    }
+  }
+
   // 【核心修复】：优先处理拍一拍
 if (usePoke) {
   var pokeText = state.pokes[Math.floor(Math.random() * state.pokes.length)];
@@ -1694,7 +1784,9 @@ if (usePoke) {
   });
 } else   if (useCard) {
     var finalText = buildCardText(cards);
-    chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: finalText, time: Date.now() });
+    var _cMsg = { from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: finalText, time: Date.now() };
+    if (autoQuote) _cMsg.quote = autoQuote;
+    chatMessages.push(_cMsg);
   } else if (useSticker) {
   var lastMsg = chatMessages[chatMessages.length - 1];
   if (lastMsg === undefined || lastMsg === null) lastMsg = { from: 'system' };
@@ -1703,9 +1795,13 @@ if (usePoke) {
   } else {
     stickerIdx = Math.floor(Math.random() * stickers.length);
   }
-  chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: '[表情]', stickerIdx: stickerIdx, stickerData: stickers[stickerIdx], time: Date.now() });
+  var _sMsg = { from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: '[表情]', stickerIdx: stickerIdx, stickerData: stickers[stickerIdx], time: Date.now() };
+  if (autoQuote) _sMsg.quote = autoQuote;
+  chatMessages.push(_sMsg);
 } else {
-  chatMessages.push({ from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: '…', time: Date.now() });
+  var _tMsg = { from: 'dream', senderId: senderId, senderAvatar: senderAvatar, text: '…', time: Date.now() };
+  if (autoQuote) _tMsg.quote = autoQuote;
+  chatMessages.push(_tMsg);
 }
 
 // ===== 梦角随机撤回自己发的消息（3% 概率）=====
@@ -1731,7 +1827,7 @@ if (_lastMsg && _lastMsg.from === 'dream' && Math.random() < 0.03) {
 }
   
   // ===== 梦角主动发红包（5% 概率） =====
-  if (Math.random() < 0.05) {
+  if (Math.random() < 0.02) {
     var rpSenderId = isGroup ? senderId : state.currentChatId;
     if (rpSenderId) {
       var rpSender = state.dreams.find(function(d) { return d.id === rpSenderId; });
@@ -1790,8 +1886,8 @@ if (_lastMsg && _lastMsg.from === 'dream' && Math.random() < 0.03) {
     }
   }
 
-   // ===== 梦角主动送礼物（5% 概率） =====
-  if (Math.random() < 0.05) {
+   // ===== 梦角主动送礼物（2% 概率） =====
+  if (Math.random() < 0.02) {
     var giftSenderId = isGroup ? senderId : state.currentChatId;
     if (giftSenderId) {
       var giftSender = state.dreams.find(function(d) { return d.id === giftSenderId; });
@@ -1931,7 +2027,7 @@ function renderChat() {
     if (g2) document.getElementById('chatHeaderName').textContent = g2.name + ' (' + g2.memberIds.length + ')';
   } else {
     var d = state.dreams.find(function(item) { return item.id === state.currentChatId; });
-    if (d) document.getElementById('chatHeaderName').textContent = d.name;
+    if (d) document.getElementById('chatHeaderName').textContent = d.name + (d.currentStatus ? ' · ' + d.currentStatus : '');
   }
 
   // ===== 更新通话横条（只有被邀请才显示） =====
@@ -2828,7 +2924,7 @@ function renderChatList() {
           <img class="chat-list-avatar" src="${avatar}">
           <div class="chat-list-info">
             <div class="chat-list-top">
-             <span class="chat-list-name">${d.name}${state.mutedChats && state.mutedChats.indexOf(d.id) === -1 && state.chatSessions[d.id] && state.chatSessions[d.id].some(function(x){return x.from==='dream' && x.time > (state.lastReadAt && state.lastReadAt[d.id] || 0)}) ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff3b30;margin-left:6px;vertical-align:middle;"></span>' : ''}</span>
+             <span class="chat-list-name">${d.name}${d.currentStatus ? '<span style="font-size:11px;color:var(--gray);font-weight:400;margin-left:6px;">' + d.currentStatus + '</span>' : ''}${state.mutedChats && state.mutedChats.indexOf(d.id) === -1 && state.chatSessions[d.id] && state.chatSessions[d.id].some(function(x){return x.from==='dream' && x.time > (state.lastReadAt && state.lastReadAt[d.id] || 0)}) ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff3b30;margin-left:6px;vertical-align:middle;"></span>' : ''}</span>
               <span class="chat-list-time">${time}</span>
             </div>
             <div class="chat-list-preview">${preview}</div>
@@ -2866,7 +2962,7 @@ function openChat(id) {
     var d = state.dreams.find(function(item) { return item.id === id; });
     if (d) {
       state.dream = Object.assign({}, d);
-      document.getElementById('chatHeaderName').textContent = d.name;
+      document.getElementById('chatHeaderName').textContent = d.name + (d.currentStatus ? ' · ' + d.currentStatus : '');
     } else {
       showToast('该梦角不存在');
       navigateTo('pageChatList');
@@ -3471,30 +3567,120 @@ function hideTypingIndicator() {
   if (indicator) indicator.style.display = 'none';
 }
 
-// ===== 长按消息菜单 =====
+// ===== 长按消息菜单（事件委托版，修复红包/礼物卡片无法删除） =====
 var pressTimer = null;
+var pressTarget = null;
+var pressStartX = 0;
+var pressStartY = 0;
+var pressTriggered = false;
+
+// 长按触发后，拦截下一次 click（防止打开红包/礼物详情把菜单盖掉）
+(function initClickSuppress() {
+  if (window._clickSuppressBound) return;
+  window._clickSuppressBound = true;
+  window._suppressNextClick = false;
+  document.addEventListener('click', function(e) {
+    if (window._suppressNextClick) {
+      e.preventDefault();
+      e.stopPropagation();
+      window._suppressNextClick = false;
+    }
+  }, true);
+})();
 
 function attachLongPress() {
   var container = document.getElementById('chatMessages');
   if (!container) return;
-  var bubbles = container.querySelectorAll('[data-msg-index]');
-  bubbles.forEach(function(el) {
-    var idx = parseInt(el.dataset.msgIndex);
-    el.addEventListener('touchstart', function(e) {
-      pressTimer = setTimeout(function() {
-        showMsgMenu(idx, el);
-        if (navigator.vibrate) navigator.vibrate(30);
-      }, 500);
-    }, { passive: true });
-    el.addEventListener('touchend', function() { clearTimeout(pressTimer); });
-    el.addEventListener('touchmove', function() { clearTimeout(pressTimer); });
-    el.addEventListener('touchcancel', function() { clearTimeout(pressTimer); });
-    el.addEventListener('mousedown', function(e) {
-      pressTimer = setTimeout(function() { showMsgMenu(idx, el); }, 500);
-    });
-    el.addEventListener('mouseup', function() { clearTimeout(pressTimer); });
-    el.addEventListener('mouseleave', function() { clearTimeout(pressTimer); });
+  if (container._msgPressBound) return;
+  container._msgPressBound = true;
+
+  function findMsgEl(el) {
+    while (el && el !== container) {
+      if (el.dataset && el.dataset.msgIndex !== undefined) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+
+  function onStart(e, el) {
+    if (!el) return;
+    var t = e.touches && e.touches[0] ? e.touches[0] : e;
+    pressStartX = t.clientX;
+    pressStartY = t.clientY;
+    pressTarget = el;
+    pressTriggered = false;
+
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(function() {
+      if (!pressTarget) return;
+      pressTriggered = true;
+      var idx = parseInt(pressTarget.dataset.msgIndex);
+      showMsgMenu(idx, pressTarget);
+      if (navigator.vibrate) navigator.vibrate(30);
+    }, 500);
+  }
+
+  function onMove(e) {
+    if (!pressTarget) return;
+    var t = e.touches && e.touches[0] ? e.touches[0] : e;
+    var dx = t.clientX - pressStartX;
+    var dy = t.clientY - pressStartY;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+      clearTimeout(pressTimer);
+      pressTarget = null;
+    }
+  }
+
+  function onEnd(e) {
+    clearTimeout(pressTimer);
+    if (pressTriggered) {
+      window._suppressNextClick = true;
+      setTimeout(function() { window._suppressNextClick = false; }, 300);
+    }
+    pressTarget = null;
+    pressTriggered = false;
+  }
+
+  container.addEventListener('touchstart', function(e) {
+    var el = findMsgEl(e.target);
+    if (el) onStart(e, el);
+  }, { passive: true });
+
+  container.addEventListener('touchmove', onMove, { passive: true });
+
+  container.addEventListener('touchend', function(e) {
+    if (!pressTarget && !pressTriggered) return;
+    onEnd(e);
   });
+
+  container.addEventListener('touchcancel', function(e) {
+    clearTimeout(pressTimer);
+    pressTarget = null;
+    pressTriggered = false;
+  });
+
+  container.addEventListener('mousedown', function(e) {
+    var el = findMsgEl(e.target);
+    if (el) onStart(e, el);
+  });
+
+  container.addEventListener('mousemove', onMove);
+
+  container.addEventListener('mouseup', function(e) {
+    if (!pressTarget && !pressTriggered) return;
+    onEnd(e);
+  });
+}
+
+// 消息文本兜底（让红包/礼物卡片也能被引用、收藏）
+function getMsgDisplayText(m) {
+  if (!m) return '消息';
+  if (m.type === 'redpacket') return '🧧 红包';
+  if (m.type === 'gift') return '🎁 礼物';
+  if (m.type === 'forward') return '📋 聊天记录';
+  if (m.type === 'image') return '[图片]';
+  if (m.text) return m.text;
+  return '[表情]';
 }
 
 function showMsgMenu(index, el) {
@@ -3569,9 +3755,10 @@ function handleMsgAction(action, index) {
       var dm = state.dreams.find(function(d) { return d.id === state.currentChatId; });
       if (dm) senderName = dm.name;
     }
-    window.quoteData = { text: m.text || '[表情]', senderName: senderName, msgId: index };
+        var _dispTxt = getMsgDisplayText(m);
+    window.quoteData = { text: _dispTxt, senderName: senderName, msgId: index };
     document.getElementById('quotePreview').style.display = 'block';
-    document.getElementById('quoteText').textContent = senderName + '：' + (m.text || '[表情]');
+    document.getElementById('quoteText').textContent = senderName + '：' + _dispTxt;
     hideMsgMenu();
     document.getElementById('chatInput').focus();
     return;
@@ -3602,9 +3789,9 @@ function handleMsgAction(action, index) {
       var d2 = state.dreams.find(function(item) { return item.id === state.currentChatId; });
       chatName = d2 ? ('私聊：' + d2.name) : '';
     }
-    state.favorites.push({
+       state.favorites.push({
       id: 'fav_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-      text: m.text || '[表情]',
+      text: getMsgDisplayText(m),
       senderName: who,
       isUser: m.from === 'user',
       chatName: chatName,
@@ -3865,6 +4052,20 @@ function initSpeedSettings() {
       state.settings.cardJoinMax = v;
       this.value = v;
       saveState();
+    };
+  }
+
+  // 梦角主动引用开关
+  var quoteToggle = document.getElementById('dreamQuoteToggle');
+  if (quoteToggle) {
+    if (!state.settings) state.settings = {};
+    var quoteOn = state.settings.dreamQuoteEnabled !== false;
+    quoteToggle.classList.toggle('on', quoteOn);
+    quoteToggle.onclick = function() {
+      state.settings.dreamQuoteEnabled = !(state.settings.dreamQuoteEnabled !== false);
+      quoteToggle.classList.toggle('on', state.settings.dreamQuoteEnabled !== false);
+      saveState();
+      showToast(state.settings.dreamQuoteEnabled !== false ? '已开启梦角引用' : '已关闭梦角引用');
     };
   }
 }
@@ -4611,6 +4812,7 @@ function renderFavorites() {
           <span style="font-size:11px;color:var(--gray);">${dateStr}</span>
         </div>
         <div style="font-size:14px;color:var(--text);line-height:1.4;margin-bottom:6px;word-break:break-word;">${fav.text}</div>
+        <div style="font-size:11px;color:#576b95;margin-bottom:4px;">由 ${fav.favBy || (fav.isUser ? '我' : '梦角')} 收藏</div>
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <span style="font-size:11px;color:#bbb;">${fav.chatName}</span>
           <span onclick="deleteFavorite('${fav.id}')" style="font-size:12px;color:var(--red);cursor:pointer;padding:4px 8px;">删除</span>
@@ -4633,7 +4835,7 @@ function renderDiaryList() {
   var container = document.getElementById('diaryList');
   if (!container) return;
   if (!state.diaries || state.diaries.length === 0) {
-    container.innerHTML = '<div style="padding:60px 20px;text-align:center;color:var(--gray);">还没有日记，点右上角 ✎ 写下第一篇吧</div>';
+    container.innerHTML = '<div style="padding:60px 20px;text-align:center;color:var(--gray);font-size:14px;">还没有日记，点右上角 ✎ 写下第一篇吧</div>';
     return;
   }
 
@@ -4642,48 +4844,101 @@ function renderDiaryList() {
   container.innerHTML = sorted.map(function(d) {
     var t = new Date(d.time);
     var timeStr = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
-    var dateStr = (t.getMonth()+1) + '月' + t.getDate() + '日';
-
-    var avatar = d.authorAvatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2740%27 height=%2740%27 viewBox=%270 0 40 40%27%3E%3Ccircle cx=%2720%27 cy=%2720%27 r=%2720%27 fill=%27%23ffe0e8%27/%3E%3Ctext x=%2720%27 y=%2725%27 text-anchor=%27middle%27 fill=%27%23d6336c%27 font-size=%2716%27%3E💜%3C/text%3E%3C/svg%3E';
+    var dateStr = (t.getMonth() + 1) + '月' + t.getDate() + '日';
+    var avatar = d.authorAvatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2744%27 height=%2744%27 viewBox=%270 0 44 44%27%3E%3Ccircle cx=%2722%27 cy=%2722%27 r=%2722%27 fill=%27%23ffe0e8%27/%3E%3Ctext x=%2722%27 y=%2727%27 text-anchor=%27middle%27 fill=%27%23d6336c%27 font-size=%2718%27%3E💜%3C/text%3E%3C/svg%3E';
 
     var commentsHtml = '';
     if (d.comments && d.comments.length > 0) {
-      commentsHtml = '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">';
+      commentsHtml = '<div class="diary-item-comments">';
       d.comments.forEach(function(c) {
         var cAvatar = c.authorAvatar || avatar;
-        commentsHtml += '<div style="display:flex;gap:8px;margin-bottom:8px;">';
-        commentsHtml += '<img src="' + cAvatar + '" style="width:28px;height:28px;border-radius:50%;flex-shrink:0;object-fit:cover;">';
-        commentsHtml += '<div style="flex:1;">';
-        commentsHtml += '<span style="font-size:12px;font-weight:600;color:var(--text);">' + c.authorName + '</span>';
-        if (c.replyToName) commentsHtml += '<span style="font-size:12px;color:var(--gray);"> 回复 </span><span style="font-size:12px;font-weight:600;color:var(--text);">' + c.replyToName + '</span>';
-        commentsHtml += '<span style="font-size:12px;color:var(--text);margin-left:4px;">：' + c.text + '</span>';
+        var canReply = (c.authorId !== 'user');
+        var clickAttr = canReply
+          ? ' onclick="replyToDiaryComment(\'' + d.id + '\', \'' + c.id + '\')" style="cursor:pointer;"'
+          : '';
+        commentsHtml += '<div class="diary-comment-item"' + clickAttr + '>';
+        commentsHtml += '<img class="diary-comment-item-avatar" src="' + cAvatar + '">';
+        commentsHtml += '<div style="flex:1;font-size:13px;line-height:1.5;word-break:break-word;">';
+        commentsHtml += '<span style="font-weight:600;color:#576b95;">' + c.authorName + '</span>';
+        if (c.replyToName) commentsHtml += '<span style="color:var(--gray);"> 回复 </span><span style="font-weight:600;color:#576b95;">' + c.replyToName + '</span>';
+        commentsHtml += '<span style="color:var(--text);margin-left:4px;">：' + c.text + '</span>';
         commentsHtml += '</div></div>';
       });
       commentsHtml += '</div>';
     }
 
-    return `
-      <div style="background:var(--card);margin:10px 12px;padding:16px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);position:relative;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-          <img src="${avatar}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">
-          <div style="flex:1;">
-            <div style="font-size:14px;font-weight:600;color:var(--text);">${d.authorName}</div>
-            <div style="font-size:11px;color:var(--gray);">${dateStr} ${timeStr}</div>
-          </div>
-          <span onclick="deleteDiary('${d.id}')" style="font-size:12px;color:var(--red);cursor:pointer;padding:4px 8px;border-radius:8px;user-select:none;background:rgba(255,59,48,0.1);">🗑 删除</span>
-        </div>
-        <div style="display:flex;gap:6px;margin-bottom:10px;">
-          <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">🌤 ${d.weather}</span>
-          <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#666;">💭 ${d.mood}</span>
-        </div>
-        <div style="font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${d.text}</div>
-        <div style="margin-top:12px;">
-          <span onclick="openDiaryComment('${d.id}')" style="font-size:12px;color:var(--blue);cursor:pointer;padding:4px 0;">💬 评论</span>
-        </div>
-        ${commentsHtml}
-      </div>
-    `;
+    return '<div class="diary-item">' +
+      '<img class="diary-item-avatar" src="' + avatar + '">' +
+      '<div class="diary-item-body">' +
+        '<div class="diary-item-name">' + d.authorName + '</div>' +
+        '<div class="diary-item-content">' + d.text + '</div>' +
+        '<div class="diary-item-tags">' +
+          '<span>🌤 ' + d.weather + '</span>' +
+          '<span>💭 ' + d.mood + '</span>' +
+        '</div>' +
+        '<div class="diary-item-foot">' +
+          '<span class="diary-item-time">' + dateStr + ' ' + timeStr + '</span>' +
+          '<span class="diary-item-del" onclick="deleteDiary(\'' + d.id + '\')">删除</span>' +
+        '</div>' +
+        '<div style="margin-top:8px;">' +
+          '<span class="diary-comment-btn" onclick="openDiaryComment(\'' + d.id + '\')">💬 评论</span>' +
+        '</div>' +
+        commentsHtml +
+      '</div>' +
+    '</div>';
   }).join('');
+}
+
+// ===== 日记封面 =====
+function renderDiaryCover() {
+  if (!state.settings) state.settings = {};
+  var cover = document.getElementById('diaryCover');
+  if (!cover) return;
+  if (state.settings.diaryCover) {
+    cover.style.background = 'url("' + state.settings.diaryCover + '") center/cover no-repeat';
+  } else {
+    cover.style.background = 'linear-gradient(135deg, #a8c8e0, #7ec8e3)';
+  }
+
+  var nameEl = document.getElementById('diaryCoverName');
+  var statusEl = document.getElementById('diaryCoverStatus');
+  var avatarEl = document.getElementById('diaryCoverAvatar');
+  if (nameEl) nameEl.textContent = state.profile.name || '我';
+  if (statusEl) statusEl.textContent = state.profile.status || '';
+  if (avatarEl) {
+    avatarEl.src = state.profile.avatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2776%27 height=%2776%27 viewBox=%270 0 76 76%27%3E%3Crect width=%2776%27 height=%2776%27 rx=%2712%27 fill=%27%23e8e8ed%27/%3E%3Ctext x=%2738%27 y=%2744%27 text-anchor=%27middle%27 fill=%27%2386868b%27 font-size=%2728%27%3E👤%3C/text%3E%3C/svg%3E';
+  }
+}
+
+function changeDiaryCover() {
+  var input = document.getElementById('diaryCoverInput');
+  if (input) input.click();
+}
+
+function handleDiaryCover(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var img = new Image();
+    img.onload = function() {
+      var canvas = document.createElement('canvas');
+      var MAX_WIDTH = 900, width = img.width, height = img.height;
+      if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+      canvas.width = width; canvas.height = height;
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      var compressed = canvas.toDataURL('image/jpeg', 0.75);
+      if (!state.settings) state.settings = {};
+      state.settings.diaryCover = compressed;
+      saveState();
+      renderDiaryCover();
+      showToast('封面已更新');
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+  e.target.value = '';
 }
 
 function deleteDiary(id) {
@@ -4839,6 +5094,34 @@ function openDiaryComment(diaryId) {
   showToast('评论已发布');
 
   // 触发 AI 回复（延迟 2-5 秒）
+  setTimeout(function() { triggerAiComment(diaryId, 'user'); }, 2000 + Math.random() * 3000);
+}
+
+// 点击梦角评论 → 回复
+function replyToDiaryComment(diaryId, commentId) {
+  var diary = state.diaries.find(function(d) { return d.id === diaryId; });
+  if (!diary || !diary.comments) return;
+  var target = diary.comments.find(function(c) { return c.id === commentId; });
+  if (!target) return;
+
+  var text = prompt('回复 ' + target.authorName + '：');
+  if (!text || !text.trim()) return;
+
+  diary.comments.push({
+    id: 'cmt_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    authorId: 'user',
+    authorName: state.profile.name || '我',
+    authorAvatar: state.profile.avatar || '',
+    text: text.trim(),
+    time: Date.now(),
+    replyTo: target.id,
+    replyToName: target.authorName
+  });
+  saveState();
+  renderDiaryList();
+  showToast('回复已发布');
+
+  // 触发梦角回应（延迟 2-5 秒）
   setTimeout(function() { triggerAiComment(diaryId, 'user'); }, 2000 + Math.random() * 3000);
 }
 
@@ -5617,30 +5900,26 @@ function updateMailboxBadge() {
   // 主页图标红点 - 暂时不做，先留着
 }
 
-// ===== 主屏幕拖拽 =====
+// ===== 主屏幕图标拖拽（事件委托重写版） =====
 window.appEditMode = false;
-var appPressTimer = null;
 var appDragState = null;
+var appPressTimer = null;
+var appPressStartX = 0;
+var appPressStartY = 0;
+var appPressTarget = null;
 var appDragGhost = null;
-var appDragStartPage = 0;
 
 function enterAppEditMode() {
   if (window.appEditMode) return;
   window.appEditMode = true;
-  var grids = document.querySelectorAll('.app-grid');
-  grids.forEach(function(g) { g.classList.add('editing'); });
-    var w = document.getElementById('anniversaryWidget');
-  if (w) w.classList.add('editing');
+  document.querySelectorAll('.app-grid').forEach(function(g) { g.classList.add('editing'); });
   if (navigator.vibrate) navigator.vibrate(20);
 }
 
 function exitAppEditMode() {
   if (!window.appEditMode) return;
   window.appEditMode = false;
-  var grids = document.querySelectorAll('.app-grid');
-  grids.forEach(function(g) { g.classList.remove('editing'); });
-    var w = document.getElementById('anniversaryWidget');
-  if (w) w.classList.remove('editing');
+  document.querySelectorAll('.app-grid').forEach(function(g) { g.classList.remove('editing'); });
   saveState();
 }
 
@@ -5649,25 +5928,27 @@ function getPageFromPoint(clientX, clientY) {
   if (!container) return null;
   var rect = container.getBoundingClientRect();
   if (clientY < rect.top || clientY > rect.bottom) return null;
-  var pageW = container.offsetWidth;
+
+  var pageW = container.offsetWidth || 390;
   var offsetX = clientX - rect.left + container.scrollLeft;
   var pageIdx = Math.floor(offsetX / pageW);
   if (pageIdx < 0) pageIdx = 0;
   if (pageIdx >= state.appPages.length) pageIdx = state.appPages.length - 1;
-  // 页内槽位
-  var inPageX = offsetX - pageIdx * pageW;
-  var inPageY = clientY - rect.top + container.scrollTop;
-  var grid = document.querySelector('.app-grid[data-page-index="' + pageIdx + '"]');
+
+  var grid = container.querySelector('.app-grid[data-page-index="' + pageIdx + '"]');
   if (!grid) return null;
+
   var gridRect = grid.getBoundingClientRect();
-  var padLeft = 16, padTop = 24;
-  var cellW = (grid.clientWidth - padLeft * 2) / 4;
-  var col = Math.floor((clientX - gridRect.left - padLeft) / cellW);
-  var row = Math.floor((clientY - gridRect.top - padTop) / 96);
+  var padLeft = 16, padTop = 24, gapX = 12, gapY = 20;
+  var cellW = (gridRect.width - padLeft * 2 - gapX * 3) / 4;
+  var cellH = 82 + gapY;
+
+  var col = Math.floor((clientX - gridRect.left - padLeft) / (cellW + gapX));
+  var row = Math.floor((clientY - gridRect.top - padTop) / cellH);
   if (col < 0) col = 0; if (col > 3) col = 3;
   if (row < 0) row = 0; if (row > 5) row = 5;
-  var slotIdx = row * 4 + col;
-  return { page: pageIdx, slot: slotIdx };
+
+  return { page: pageIdx, slot: row * 4 + col };
 }
 
 function findAppKey(page, slot) {
@@ -5682,146 +5963,162 @@ function setAppKey(page, slot, key) {
 }
 
 function swapAppKeys(fromPage, fromSlot, toPage, toSlot) {
+  if (fromPage === toPage && fromSlot === toSlot) return;
   var fromKey = findAppKey(fromPage, fromSlot);
   var toKey = findAppKey(toPage, toSlot);
-  if (fromPage === toPage && fromSlot === toSlot) return;
   setAppKey(toPage, toSlot, fromKey);
   setAppKey(fromPage, fromSlot, toKey || null);
 }
 
-function startAppDrag(e, iconEl) {
-  var pageIdx = parseInt(iconEl.dataset.pageIndex);
-  var slotIdx = parseInt(iconEl.dataset.slotIndex);
-  var key = iconEl.dataset.appKey;
-  if (!key) return;
-
-  appDragState = { fromPage: pageIdx, fromSlot: slotIdx, key: key };
-  iconEl.classList.add('dragging');
-
-  // 生成幽灵元素
-  appDragGhost = iconEl.cloneNode(true);
-  appDragGhost.classList.add('app-drag-ghost');
-  appDragGhost.classList.remove('dragging');
-  appDragGhost.style.width = iconEl.offsetWidth + 'px';
-  appDragGhost.style.height = iconEl.offsetHeight + 'px';
+function createDragGhost(iconEl, cx, cy) {
   var rect = iconEl.getBoundingClientRect();
-  var clientX = e.touches ? e.touches[0].clientX : e.clientX;
-  var clientY = e.touches ? e.touches[0].clientY : e.clientY;
-  appDragGhost.dataset.offsetX = (clientX - rect.left);
-  appDragGhost.dataset.offsetY = (clientY - rect.top);
-  appDragGhost.style.left = (clientX - (clientX - rect.left)) + 'px';
-  appDragGhost.style.top = (clientY - (clientY - rect.top)) + 'px';
-  document.body.appendChild(appDragGhost);
+  var ghost = iconEl.cloneNode(true);
+  ghost.classList.add('app-drag-ghost');
+  ghost.classList.remove('dragging');
+  ghost.style.position = 'fixed';
+  ghost.style.left = rect.left + 'px';
+  ghost.style.top = rect.top + 'px';
+  ghost.style.width = rect.width + 'px';
+  ghost.style.height = rect.height + 'px';
+  ghost.style.pointerEvents = 'none';
+  ghost.style.zIndex = '9999';
+  ghost._offsetX = cx - rect.left;
+  ghost._offsetY = cy - rect.top;
+  document.body.appendChild(ghost);
+  return ghost;
 }
 
-function moveAppDrag(e) {
-  if (!appDragState || !appDragGhost) return;
-  if (e.cancelable) e.preventDefault();
-  var clientX = e.touches ? e.touches[0].clientX : e.clientX;
-  var clientY = e.touches ? e.touches[0].clientY : e.clientY;
-  appDragGhost.style.left = (clientX - parseFloat(appDragGhost.dataset.offsetX)) + 'px';
-  appDragGhost.style.top = (clientY - parseFloat(appDragGhost.dataset.offsetY)) + 'px';
+function onIconPressStart(e, iconEl) {
+  if (!iconEl || !iconEl.dataset.appKey) return;
+  var touch = e.touches && e.touches[0] ? e.touches[0] : e;
+  appPressStartX = touch.clientX;
+  appPressStartY = touch.clientY;
+  appPressTarget = iconEl;
 
-  // 拖到边缘自动翻页
+  clearTimeout(appPressTimer);
+  appPressTimer = setTimeout(function() {
+    if (!appPressTarget) return;
+    if (!window.appEditMode) enterAppEditMode();
+    appDragGhost = createDragGhost(appPressTarget, appPressStartX, appPressStartY);
+    appPressTarget.classList.add('dragging');
+    appDragState = {
+      fromPage: parseInt(appPressTarget.dataset.pageIndex),
+      fromSlot: parseInt(appPressTarget.dataset.slotIndex),
+      key: appPressTarget.dataset.appKey,
+      iconEl: appPressTarget
+    };
+    if (navigator.vibrate) navigator.vibrate(30);
+  }, 600);
+}
+
+function onIconPressMove(e) {
+  if (!appPressTarget && !appDragState) return;
+  var touch = e.touches && e.touches[0] ? e.touches[0] : e;
+
+  if (!appDragState) {
+    var dx = touch.clientX - appPressStartX;
+    var dy = touch.clientY - appPressStartY;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+      clearTimeout(appPressTimer);
+      appPressTarget = null;
+    }
+    return;
+  }
+
+  if (appDragGhost) {
+    appDragGhost.style.left = (touch.clientX - appDragGhost._offsetX) + 'px';
+    appDragGhost.style.top = (touch.clientY - appDragGhost._offsetY) + 'px';
+  }
+
   var container = document.getElementById('homeSwiper');
   if (container) {
     var rect = container.getBoundingClientRect();
-    if (clientX < rect.left + 40) {
-      container.scrollLeft -= 8;
-    } else if (clientX > rect.right - 40) {
-      container.scrollLeft += 8;
-    }
+    if (touch.clientX < rect.left + 50) container.scrollLeft -= 10;
+    else if (touch.clientX > rect.right - 50) container.scrollLeft += 10;
   }
+  if (e.cancelable) e.preventDefault();
 }
 
-function endAppDrag(e) {
-  if (!appDragState) return;
-  var clientX, clientY;
-  if (e.changedTouches && e.changedTouches[0]) {
-    clientX = e.changedTouches[0].clientX;
-    clientY = e.changedTouches[0].clientY;
-  } else {
-    clientX = e.clientX;
-    clientY = e.clientY;
-  }
-  var target = getPageFromPoint(clientX, clientY);
+function onIconPressEnd(e) {
+  clearTimeout(appPressTimer);
+
+  if (!appDragState) { appPressTarget = null; return; }
+
+  var touch = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
+  var target = getPageFromPoint(touch.clientX, touch.clientY);
   if (target) {
     swapAppKeys(appDragState.fromPage, appDragState.fromSlot, target.page, target.slot);
   }
   if (appDragGhost) { appDragGhost.remove(); appDragGhost = null; }
+  if (appDragState.iconEl) appDragState.iconEl.classList.remove('dragging');
   appDragState = null;
-  // 重新渲染
+  appPressTarget = null;
+
   renderAppIcons();
-  // 重新进入编辑模式
-  var grids = document.querySelectorAll('.app-grid');
-  grids.forEach(function(g) { g.classList.add('editing'); });
+  if (window.appEditMode) {
+    document.querySelectorAll('.app-grid').forEach(function(g) { g.classList.add('editing'); });
+  }
 }
 
-// 给所有图标绑定长按和拖拽
-function bindAppDrag() {
-  var icons = document.querySelectorAll('.app-icon[data-app-key]');
-  icons.forEach(function(iconEl) {
-    var pressTimer = null;
-    var startX = 0, startY = 0;
-    var isLongPressing = false;
-
-    function onDown(e) {
-      isLongPressing = false;
-      startX = e.touches ? e.touches[0].clientX : e.clientX;
-      startY = e.touches ? e.touches[0].clientY : e.clientY;
-
-      pressTimer = setTimeout(function() {
-        isLongPressing = true;
-        if (!window.appEditMode) enterAppEditMode();
-        startAppDrag(e, iconEl);
-      }, 800);
+// 全局事件委托——只绑一次，永不丢失
+(function initAppDragListeners() {
+  function findIcon(el) {
+    while (el && el !== document.body) {
+      if (el.classList && el.classList.contains('app-icon')) return el;
+      el = el.parentNode;
     }
+    return null;
+  }
 
-    function onUp(e) {
-      clearTimeout(pressTimer);
-      if (isLongPressing && appDragState) endAppDrag(e);
-      isLongPressing = false;
-    }
+  document.addEventListener('touchstart', function(e) {
+    var icon = findIcon(e.target);
+    if (icon) onIconPressStart(e, icon);
+  }, { passive: true });
 
-    function onMove(e) {
-      var cx = e.touches ? e.touches[0].clientX : e.clientX;
-      var cy = e.touches ? e.touches[0].clientY : e.clientY;
+  document.addEventListener('touchmove', function(e) {
+    if (!appPressTarget && !appDragState) return;
+    onIconPressMove(e);
+  }, { passive: false });
 
-      // 【核心修复】：如果还没进入长按，只要手指移动超过 5px 就取消长按
-      if (!isLongPressing) {
-        if (Math.abs(cx - startX) > 5 || Math.abs(cy - startY) > 5) {
-          clearTimeout(pressTimer);
-        }
-        return;
-      }
-      if (appDragState) moveAppDrag(e);
-    }
-
-    iconEl.addEventListener('touchstart', onDown, { passive: true });
-    iconEl.addEventListener('touchend', onUp);
-    iconEl.addEventListener('touchcancel', onUp);
-    iconEl.addEventListener('touchmove', onMove, { passive: false });
-
-    iconEl.addEventListener('mousedown', onDown);
-    iconEl.addEventListener('mouseup', onUp);
-    iconEl.addEventListener('mouseleave', onUp);
-    iconEl.addEventListener('mousemove', onMove);
+  document.addEventListener('touchend', function(e) {
+    if (!appPressTarget && !appDragState) return;
+    onIconPressEnd(e);
   });
-}
 
-// 全局监听拖拽移动/结束
-document.addEventListener('touchmove', function(e) {
-  if (appDragState) moveAppDrag(e);
-}, { passive: false });
-document.addEventListener('touchend', function(e) {
-  if (appDragState) endAppDrag(e);
+  document.addEventListener('touchcancel', function(e) {
+    if (!appPressTarget && !appDragState) return;
+    onIconPressEnd(e);
+  });
+
+  document.addEventListener('mousedown', function(e) {
+    var icon = findIcon(e.target);
+    if (icon) onIconPressStart(e, icon);
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!appPressTarget && !appDragState) return;
+    onIconPressMove(e);
+  });
+
+  document.addEventListener('mouseup', function(e) {
+    if (!appPressTarget && !appDragState) return;
+    onIconPressEnd(e);
+  });
+})();
+
+// 点击空白处退出编辑模式
+document.addEventListener('click', function(e) {
+  if (!window.appEditMode) return;
+  if (appDragState) return;
+  if (e.target.closest && e.target.closest('.app-icon')) return;
+  var pageHome = document.getElementById('pageHome');
+  if (!pageHome) return;
+  if (pageHome.offsetParent === null) return;
+  exitAppEditMode();
 });
-document.addEventListener('mousemove', function(e) {
-  if (appDragState) moveAppDrag(e);
-});
-document.addEventListener('mouseup', function(e) {
-  if (appDragState) endAppDrag(e);
-});
+
+// 兼容旧调用（空的，因为现在用事件委托）
+function bindAppDrag() {}
 
 // 点击空白退出编辑模式
 document.addEventListener('click', function(e) {
@@ -5832,13 +6129,6 @@ document.addEventListener('click', function(e) {
   if (e.target.closest('.app-icon')) return;
   exitAppEditMode();
 });
-
-// 每次渲染后重新绑定
-var origRenderAppIcons = renderAppIcons;
-renderAppIcons = function() {
-  origRenderAppIcons();
-  bindAppDrag();
-};
 
 // ===== 状态检测 =====
 function getStatusData(dreamId) {
@@ -6045,332 +6335,6 @@ function addStatusDoing(dreamId) {
 // 遮罩点击关闭
 document.getElementById('statusMask').addEventListener('click', closeStatusCheck);
 document.getElementById('statusPickMask').addEventListener('click', closeStatusPick);
-
-// ===== 纪念日小组件 =====
-function getAnniData() {
-  if (!state.anniversaries) state.anniversaries = [];
-  if (!state.settings) state.settings = {};
-  if (!state.settings.anniActiveId) state.settings.anniActiveId = null;
-  if (!state.settings.anniBg) state.settings.anniBg = null;
-  return state.anniversaries;
-}
-
-function calcDays(dateStr) {
-  if (!dateStr) return 0;
-  var d = new Date(dateStr);
-  var now = new Date();
-  d.setHours(0,0,0,0);
-  now.setHours(0,0,0,0);
-  return Math.floor((now - d) / 86400000);
-}
-
-function renderAnniversaryWidget() {
-  getAnniData();
-  var home = document.getElementById('pageHome');
-  if (!home) return;
-  var old = document.getElementById('anniversaryWidget');
-  if (old) old.remove();
-
-  var widget = document.createElement('div');
-  widget.id = 'anniversaryWidget';
-  widget.className = 'anniversary-widget';
-  // 关键：阻止浏览器手势干扰
-  widget.style.touchAction = 'none';
-  widget.style.userSelect = 'none';
-  widget.style.webkitUserSelect = 'none';
-
-  var widgetHeight = 140;
-  var visibleHeight = home.clientHeight || 600;
-
-  // 安全区：100px 到 (屏幕高度 - 卡片高度 - 20px)
-  var minTop = 100;
-  var maxTop = visibleHeight - widgetHeight - 20;
-  if (maxTop < minTop + 100) maxTop = minTop + 100;
-
-  // 图标区域底部
-  var swiper = document.getElementById('homeSwiper');
-  var iconsBottom = swiper ? (swiper.offsetTop + swiper.offsetHeight) : 380;
-
-  // 首选位置：图标下方；如果放不下，就退到屏幕内最底部
-  var preferredTop = iconsBottom + 10;
-  if (preferredTop > maxTop) preferredTop = maxTop;
-  if (preferredTop < minTop) preferredTop = minTop;
-
-  // 读取缓存位置，如果无效则重置
-  var savedTop = state.settings.anniPos ? parseFloat(state.settings.anniPos.y) : NaN;
-  if (isNaN(savedTop) || savedTop < minTop || savedTop > maxTop) {
-    savedTop = preferredTop;
-    state.settings.anniPos = { x: 16, y: savedTop };
-    saveState();
-  }
-
-  widget.style.left = '16px';
-  widget.style.top = savedTop + 'px';
-
-  if (state.settings.anniBg) {
-    widget.style.backgroundImage = 'url("' + state.settings.anniBg + '")';
-  }
-
-  var active = state.settings.anniActiveId
-    ? state.anniversaries.find(function(a) { return a.id === state.settings.anniActiveId; })
-    : null;
-
-  if (!active) {
-    widget.innerHTML = '<div class="anni-empty">＋ 点击添加纪念日</div>';
-  } else {
-    var days = calcDays(active.date);
-    var d = new Date(active.date);
-    var dateStr = d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
-    var html = '';
-    if (state.settings.anniBg) html += '<div class="anni-overlay"></div>';
-    html += '<div class="anni-content">';
-    html += '<div class="anni-title">' + active.title + '</div>';
-    html += '<div class="anni-days">' + days + '<span class="anni-days-unit">天</span></div>';
-    html += '<div class="anni-date">' + dateStr + ' 起</div>';
-    html += '</div>';
-    widget.innerHTML = html;
-  }
-
-  // ===== 拖拽逻辑 =====
-  var pressTimer = null;
-  var isDragging = false;
-  var startX = 0, startY = 0;
-  var baseTop = 0;
-  var moved = false;
-
-  function onStart(cx, cy) {
-    moved = false;
-    startX = cx;
-    startY = cy;
-    baseTop = parseFloat(widget.style.top) || savedTop;
-
-    pressTimer = setTimeout(function() {
-      isDragging = true;
-      if (!window.appEditMode) enterAppEditMode();
-      widget.style.transition = 'none';
-      if (navigator.vibrate) navigator.vibrate(20);
-    }, 600);
-  }
-
-  function onMove(cx, cy) {
-    var dx = cx - startX;
-    var dy = cy - startY;
-
-    if (!isDragging) {
-      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-        clearTimeout(pressTimer);
-      }
-      return;
-    }
-
-    moved = true;
-    var newTop = baseTop + dy;
-    var currentMaxTop = (home.clientHeight || 600) - widgetHeight - 20;
-    if (newTop < minTop) newTop = minTop;
-    if (newTop > currentMaxTop) newTop = currentMaxTop;
-    widget.style.top = newTop + 'px';
-  }
-
-  function onEnd() {
-    clearTimeout(pressTimer);
-    if (isDragging) {
-      isDragging = false;
-      widget.style.transition = '';
-      var top = parseFloat(widget.style.top) || savedTop;
-      var currentMaxTop = (home.clientHeight || 600) - widgetHeight - 20;
-      var rowH = 102;
-      // 网格吸附
-      top = Math.round((top - minTop) / rowH) * rowH + minTop;
-      if (top < minTop) top = minTop;
-      if (top > currentMaxTop) top = currentMaxTop;
-      widget.style.top = top + 'px';
-      state.settings.anniPos = { x: 16, y: top };
-      saveState();
-    } else if (!moved) {
-      // 纯点击 → 打开面板
-      if (!window.appEditMode) openAnniPanel();
-    }
-    moved = false;
-  }
-
-  // 触摸事件（关键：passive:false）
-  widget.addEventListener('touchstart', function(e) {
-    if (e.touches.length !== 1) return;
-    e.preventDefault();
-    var t = e.touches[0];
-    onStart(t.clientX, t.clientY);
-
-    var moveH = function(ev) {
-      if (ev.touches.length !== 1) return;
-      if (isDragging) ev.preventDefault();
-      var t2 = ev.touches[0];
-      onMove(t2.clientX, t2.clientY);
-    };
-    var endH = function() {
-      document.removeEventListener('touchmove', moveH);
-      document.removeEventListener('touchend', endH);
-      document.removeEventListener('touchcancel', endH);
-      onEnd();
-    };
-    document.addEventListener('touchmove', moveH, { passive: false });
-    document.addEventListener('touchend', endH);
-    document.addEventListener('touchcancel', endH);
-  }, { passive: false });
-
-  // 鼠标事件
-  widget.addEventListener('mousedown', function(e) {
-    e.preventDefault();
-    onStart(e.clientX, e.clientY);
-
-    var moveH = function(ev) { onMove(ev.clientX, ev.clientY); };
-    var endH = function() {
-      document.removeEventListener('mousemove', moveH);
-      document.removeEventListener('mouseup', endH);
-      onEnd();
-    };
-    document.addEventListener('mousemove', moveH);
-    document.addEventListener('mouseup', endH);
-  });
-
-  home.appendChild(widget);
-}
-
-function openAnniPanel() {
-  getAnniData();
-  renderAnniPanelList();
-  document.getElementById('anniPanel').style.display = 'block';
-  document.getElementById('anniMask').style.display = 'block';
-}
-
-function closeAnniPanel() {
-  document.getElementById('anniPanel').style.display = 'none';
-  document.getElementById('anniMask').style.display = 'none';
-}
-
-function renderAnniPanelList() {
-  var content = document.getElementById('anniPanelContent');
-  var html = '';
-
-  // 背景设置
-  html += '<div class="anni-form-row"><label>组件背景图</label>';
-  html += '<button class="anni-bg-btn" onclick="document.getElementById(\'anniBgInput\').click()">选择图片</button>';
-  if (state.settings.anniBg) {
-    html += '<button class="anni-bg-btn" onclick="resetAnniBg()" style="color:var(--red);">清除背景图</button>';
-  }
-  html += '<input type="file" id="anniBgInput" accept="image/*" style="display:none" onchange="handleAnniBg(event)">';
-  html += '</div>';
-
-  // 纪念日列表
-  html += '<div style="font-size:13px;font-weight:600;color:var(--text);margin:16px 0 8px;">选择展示</div>';
-  if (state.anniversaries.length === 0) {
-    html += '<div style="text-align:center;color:var(--gray);font-size:13px;padding:16px;">还没有纪念日</div>';
-  } else {
-    state.anniversaries.forEach(function(a) {
-      var isActive = state.settings.anniActiveId === a.id;
-      html += '<div class="anni-list-item' + (isActive ? ' active' : '') + '" onclick="pickAnni(\'' + a.id + '\')">';
-      html += '<div class="anni-item-info">';
-      html += '<div class="anni-item-title">' + a.title + '</div>';
-      html += '<div class="anni-item-date">' + a.date + ' · ' + calcDays(a.date) + ' 天</div>';
-      html += '</div>';
-      html += '<div class="anni-item-actions">';
-      html += '<span class="edit" onclick="event.stopPropagation();editAnni(\'' + a.id + '\')">编辑</span>';
-      html += '<span class="del" onclick="event.stopPropagation();deleteAnni(\'' + a.id + '\')">删除</span>';
-      html += '</div>';
-      html += '</div>';
-    });
-  }
-  html += '<button class="anni-add-btn" onclick="addAnni()">+ 添加纪念日</button>';
-
-  content.innerHTML = html;
-}
-
-function pickAnni(id) {
-  state.settings.anniActiveId = id;
-  saveState();
-  renderAnniPanelList();
-  renderAnniversaryWidget();
-  showToast('已选择展示');
-}
-
-function addAnni() {
-  var title = prompt('纪念日名称（如：在一起）');
-  if (!title || !title.trim()) return;
-  var date = prompt('日期（格式：2020-01-01）');
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { showToast('日期格式不对，要 2020-01-01 这样'); return; }
-  var id = 'anni_' + Date.now();
-  state.anniversaries.push({ id: id, title: title.trim(), date: date });
-  if (!state.settings.anniActiveId) state.settings.anniActiveId = id;
-  saveState();
-  renderAnniPanelList();
-  renderAnniversaryWidget();
-  showToast('已添加');
-}
-
-function editAnni(id) {
-  var a = state.anniversaries.find(function(x) { return x.id === id; });
-  if (!a) return;
-  var title = prompt('修改名称', a.title);
-  if (title === null) return;
-  if (!title.trim()) return;
-  var date = prompt('修改日期（格式：2020-01-01）', a.date);
-  if (date === null) return;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { showToast('日期格式不对'); return; }
-  a.title = title.trim();
-  a.date = date;
-  saveState();
-  renderAnniPanelList();
-  renderAnniversaryWidget();
-  showToast('已修改');
-}
-
-function deleteAnni(id) {
-  if (!confirm('确定删除这个纪念日？')) return;
-  state.anniversaries = state.anniversaries.filter(function(x) { return x.id !== id; });
-  if (state.settings.anniActiveId === id) {
-    state.settings.anniActiveId = state.anniversaries[0] ? state.anniversaries[0].id : null;
-  }
-  saveState();
-  renderAnniPanelList();
-  renderAnniversaryWidget();
-  showToast('已删除');
-}
-
-function handleAnniBg(e) {
-  var file = e.target.files[0];
-  if (!file) return;
-  var reader = new FileReader();
-  reader.onload = function(ev) {
-    var img = new Image();
-    img.onload = function() {
-      var canvas = document.createElement('canvas');
-      var MAX_WIDTH = 800, width = img.width, height = img.height;
-      if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
-      canvas.width = width; canvas.height = height;
-      var ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      var compressed = canvas.toDataURL('image/jpeg', 0.7);
-      state.settings.anniBg = compressed;
-      saveState();
-      renderAnniversaryWidget();
-      renderAnniPanelList();
-      showToast('背景已设置');
-    };
-    img.src = ev.target.result;
-  };
-  reader.readAsDataURL(file);
-  e.target.value = '';
-}
-
-function resetAnniBg() {
-  state.settings.anniBg = null;
-  saveState();
-  renderAnniversaryWidget();
-  renderAnniPanelList();
-  showToast('已清除背景');
-}
-
-// 遮罩点击关闭
-document.getElementById('anniMask').addEventListener('click', closeAnniPanel);
 
 // ===== 覆盖 AI 群主行为：只增加禁言用户，不踢人 =====
 var originalAiGroupOwnerAction = aiGroupOwnerAction;
@@ -8763,3 +8727,105 @@ document.addEventListener('input', function(e) {
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onEnd);
 })();
+
+// ===== 梦角状态系统 =====
+function tickDreamStatus() {
+  if (!state.dreams || state.dreams.length === 0) return;
+  var now = Date.now();
+  var changed = false;
+  state.dreams.forEach(function(d) {
+    if (!d.statuses || d.statuses.length === 0) return;
+    // 兜底：如果状态池有内容但当前状态为空，立刻选一个
+    if (!d.currentStatus) {
+      d.currentStatus = d.statuses[0];
+      changed = true;
+    }
+    var last = d.statusUpdateAt || 0;
+    if (now - last < 60 * 60 * 1000) return;
+    d.statusUpdateAt = now;
+    if (Math.random() < 0.5) {
+      d.currentStatus = d.statuses[Math.floor(Math.random() * d.statuses.length)];
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    saveState();
+    try { renderChatList(); } catch(e) {}
+    if (state.currentChatId && !state.currentChatId.startsWith('group_')) {
+      var d2 = state.dreams.find(function(x){ return x.id === state.currentChatId; });
+      var header = document.getElementById('chatHeaderName');
+      if (d2 && header) header.textContent = d2.name + (d2.currentStatus ? ' · ' + d2.currentStatus : '');
+    }
+  }
+}
+
+function startDreamStatusTicker() {
+  tickDreamStatus();
+  setInterval(tickDreamStatus, 5 * 60 * 1000);
+}
+
+// ===== 编辑页状态池 =====
+function renderDreamStatusList() {
+  var d = state.dreams.find(function(x) { return x.id === state.currentEditDreamId; });
+  if (!d) return;
+  if (!d.statuses) d.statuses = [];
+  var list = document.getElementById('dreamStatusList');
+  if (!list) return;
+  if (d.statuses.length === 0) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--gray);padding:6px 0;">还没有状态，添加一条试试</div>';
+    return;
+  }
+  list.innerHTML = d.statuses.map(function(s, i) {
+    var isCurrent = (d.currentStatus === s);
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:' + (isCurrent ? 'rgba(0,122,255,0.08)' : 'rgba(0,0,0,0.03)') + ';border-radius:10px;">' +
+      '<span style="font-size:13px;color:var(--text);">' + s + (isCurrent ? ' <span style="color:var(--blue);font-size:11px;">（当前）</span>' : '') + '</span>' +
+      '<span onclick="deleteDreamStatus(' + i + ')" style="color:var(--red);cursor:pointer;font-size:16px;padding:0 4px;">×</span>' +
+      '</div>';
+  }).join('');
+}
+
+function addDreamStatus() {
+  var d = state.dreams.find(function(x) { return x.id === state.currentEditDreamId; });
+  if (!d) return;
+  if (!d.statuses) d.statuses = [];
+  var input = document.getElementById('newStatusInput');
+  var val = (input.value || '').trim();
+  if (!val) return;
+  if (d.statuses.indexOf(val) > -1) { showToast('该状态已存在'); return; }
+  d.statuses.push(val);
+  // 如果当前还没有选中的状态，就把这条设为当前
+  if (!d.currentStatus) d.currentStatus = val;
+  input.value = '';
+  saveState();
+  renderDreamStatusList();
+}
+
+function batchAddDreamStatus() {
+  var d = state.dreams.find(function(x) { return x.id === state.currentEditDreamId; });
+  if (!d) return;
+  var raw = prompt('批量添加状态，每行一个：');
+  if (!raw) return;
+  var lines = raw.split('\n').map(function(s){return s.trim();}).filter(function(s){return s;});
+  if (lines.length === 0) return;
+  if (!d.statuses) d.statuses = [];
+  var added = 0;
+  lines.forEach(function(l) {
+    if (d.statuses.indexOf(l) === -1) { d.statuses.push(l); added++; }
+  });
+  // 如果当前还没有选中的状态，就把新加的第一条设为当前
+  if (!d.currentStatus && d.statuses.length > 0) d.currentStatus = d.statuses[0];
+  saveState();
+  renderDreamStatusList();
+  showToast('已添加 ' + added + ' 条');
+}
+
+function deleteDreamStatus(i) {
+  var d = state.dreams.find(function(x) { return x.id === state.currentEditDreamId; });
+  if (!d || !d.statuses) return;
+  var removed = d.statuses[i];
+  d.statuses.splice(i, 1);
+  if (d.currentStatus === removed) d.currentStatus = '';
+  saveState();
+  renderDreamStatusList();
+}
