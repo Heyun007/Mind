@@ -983,13 +983,15 @@ function renderCheckinHistory() {
     const time = new Date(c.timestamp);
     const timeStr = time.getMonth()+1 + '/' + time.getDate() + ' ' + String(time.getHours()).padStart(2,'0') + ':' + String(time.getMinutes()).padStart(2,'0');
 
-    // 兜底 1：老数据里没存 dreamName，用 dreamId 反查
-    var dname = c.dreamName;
-    if (!dname && c.dreamId) {
+    // 优先用 dreamId 反查最新名字（这样改名后立即生效）
+    var dname = '';
+    if (c.dreamId) {
       var d = state.dreams.find(function(x) { return x.id === c.dreamId; });
       if (d && d.name) dname = d.name;
     }
-    // 兜底 2：整个查岗历史都翻一遍，找有没有同名梦角
+    // 查不到就退回存的旧名字
+    if (!dname && c.dreamName && c.dreamName !== '梦角') dname = c.dreamName;
+    // 只有一个梦角的话，直接用
     if (!dname && state.dreams && state.dreams.length === 1) {
       dname = state.dreams[0].name;
     }
