@@ -1086,3 +1086,18 @@ button[onclick="sendChatMsg()"] {
   flex-shrink: 0;
   object-fit: cover;
 }
+
+/* ===== 修复第三方浏览器（雨见等）触摸拦截 ===== */
+.app-grid, .app-icon, .app-icon-slot, #homeSwiper {
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+.app-icon {
+  touch-action: manipulation;
+}
+.app-grid.editing .app-icon,
+.app-drag-ghost {
+  touch-action: none !important;
+}
