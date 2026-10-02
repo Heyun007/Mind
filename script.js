@@ -982,9 +982,22 @@ function renderCheckinHistory() {
   list.innerHTML = state.checkinHistory.slice().reverse().map(c => {
     const time = new Date(c.timestamp);
     const timeStr = time.getMonth()+1 + '/' + time.getDate() + ' ' + String(time.getHours()).padStart(2,'0') + ':' + String(time.getMinutes()).padStart(2,'0');
+
+    // 兜底 1：老数据里没存 dreamName，用 dreamId 反查
+    var dname = c.dreamName;
+    if (!dname && c.dreamId) {
+      var d = state.dreams.find(function(x) { return x.id === c.dreamId; });
+      if (d && d.name) dname = d.name;
+    }
+    // 兜底 2：整个查岗历史都翻一遍，找有没有同名梦角
+    if (!dname && state.dreams && state.dreams.length === 1) {
+      dname = state.dreams[0].name;
+    }
+    if (!dname) dname = '梦角';
+
     return `<div class="history-item">
       <div class="hi-left">
-       <div class="hi-main">${c.dreamName || '梦角'}：${c.message || '查岗消息'}</div>
+       <div class="hi-main">${dname}：${c.message || '查岗消息'}</div>
         <div class="hi-time">${timeStr}</div>
       </div>
     </div>`;
