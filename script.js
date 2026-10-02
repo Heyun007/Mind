@@ -6008,7 +6008,7 @@ function onIconPressStart(e, iconEl) {
       iconEl: appPressTarget
     };
     if (navigator.vibrate) navigator.vibrate(30);
-  }, 600);
+  }, 400);
 }
 
 function onIconPressMove(e) {
@@ -6073,7 +6073,7 @@ function onIconPressEnd(e) {
   document.addEventListener('touchstart', function(e) {
     var icon = findIcon(e.target);
     if (icon) onIconPressStart(e, icon);
-  }, { passive: true });
+  }, { passive: false, capture: true });
 
   document.addEventListener('touchmove', function(e) {
     if (!appPressTarget && !appDragState) return;
