@@ -1503,6 +1503,14 @@ button[onclick="sendChatMsg()"] {
 
 /* 小点永远在最上层，不被小组件盖住 */
 #homePager {
+
+  /* 聊天页顶部栏毛玻璃 */
+#pagePrivateChat .page-header {
+  background: rgba(255,255,255,0.55) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.3) !important;
+}
   position: relative;
   z-index: 200;
 }
