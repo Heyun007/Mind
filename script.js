@@ -2477,22 +2477,7 @@ function deleteSticker(idx) {
 }
 
 function setupChatBg() {
-  var input = document.getElementById('chatBgInput');
-  if (!input) return;
-  input.onchange = function() {
-    var file = this.files[0];
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      chatSettings.bg = e.target.result;
-      localStorage.setItem('dreamChatBg', e.target.result);
-      document.getElementById('chatBgStatus').textContent = '已设置 ✓';
-      document.getElementById('chatBgPreview').style.display = 'block';
-      document.getElementById('chatBgPreview').style.background = 'url(' + e.target.result + ') center/cover';
-      showToast('聊天背景已设置');
-    };
-    reader.readAsDataURL(file);
-  };
+  // 绑在 HTML 上了，不用再绑
 }
 
 function clearCallHistory() {
