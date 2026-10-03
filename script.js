@@ -12062,7 +12062,7 @@ function renderWidgetInner(type, cfg) {
         '<div style="display:flex;justify-content:space-between;align-items:center;color:' + textColor + ';font-size:16px;padding:0 8px;">' +
           '<span style="opacity:0.85;">☆</span>' +
           '<span>⏮</span>' +
-'<span style="font-size:18px;letter-spacing:-3px;">❚❚</span>' +
+'<span style="display:inline-flex;align-items:center;gap:3px;vertical-align:middle;"><span style="display:inline-block;width:3px;height:14px;background:currentColor;border-radius:1px;"></span><span style="display:inline-block;width:3px;height:14px;background:currentColor;border-radius:1px;"></span></span>' +
           '<span>⏭</span>' +
           '<span style="opacity:0.85;">◉</span>' +
         '</div>' +
@@ -12270,7 +12270,7 @@ function renderWidgetInner(type, cfg) {
           '<div style="font-size:' + (9*sc) + 'px;color:#333;text-align:center;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:' + (4*sc) + 'px;">' + escapeHtml(cfg.songName || '') + '</div>' +
           '<div style="height:' + (2*sc) + 'px;background:rgba(0,0,0,0.12);border-radius:1px;overflow:hidden;margin-bottom:' + (4*sc) + 'px;"><div style="width:60%;height:100%;background:#666;border-radius:1px;"></div></div>' +
           '<div style="display:flex;justify-content:space-around;font-size:' + (11*sc) + 'px;color:#555;line-height:1;">' +
-'<span>★</span><span>⏮</span><span style="font-size:0.9em;letter-spacing:-2px;">❚❚</span><span>⏭</span><span>♥</span>' +
+'<span>★</span><span>⏮</span><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle;"><span style="display:inline-block;width:2px;height:9px;background:currentColor;border-radius:1px;"></span><span style="display:inline-block;width:2px;height:9px;background:currentColor;border-radius:1px;"></span></span><span>⏭</span><span>♥</span>' +
           '</div>' +
         '</div>' +
       '</div>';
