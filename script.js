@@ -62,10 +62,19 @@ let state = {
         bannedDreams: [],         // 被封禁的梦角 [{ dreamId, until }]
   apologizingDreams: [],    // 强制道歉的梦角 [{ dreamId, until }]
   cheatUsage: { date: '', unbanGroups: [], seizeGroups: [] },  // 外挂使用记录
-    musicLibrary: {
-    songs: [],      // 所有导入的歌曲
-    playlists: []   // 用户创建的播放列表
+  musicLibrary: {
+    songs: [],
+    playlists: []
   },
+  widgets: [],
+  memos: [],
+  quizQuestions: [],
+  quizMeQuestions: [],
+  quizHistory: [],
+  avatarLibrary: [],
+  lastAvatarScan: 0,
+  dreamRecall: { records: [] },
+  dreamRecallDone: {},
 };
 
 // ===== 图标配置 =====
@@ -85,6 +94,11 @@ const ICONS_CONFIG = [
   { key: 'pageStickers', name: '表情包', emoji: '😀', color: 'icon-blue' },
   { key: 'pageWork', name: '打工', emoji: '💼', color: 'icon-orange' },
   { key: 'pageMusic', name: '音乐', emoji: '🎵', color: 'icon-purple' },
+  { key: 'pageDreamRecall', name: '梦境', emoji: '🌙', color: 'icon-purple' },
+  { key: 'pageQuiz', name: '问卷', emoji: '📋', color: 'icon-blue' },
+  { key: 'pageMemoList', name: '备忘录', emoji: '📝', color: 'icon-orange' },
+  { key: 'pageAvatar', name: '头像', emoji: '🖼️', color: 'icon-pink' },
+  { key: 'pageWidgets', name: '小组件', emoji: '🧩', color: 'icon-purple' },
 ];
 
 // ===== 1. 渲染主页图标 =====
@@ -94,7 +108,6 @@ var MIN_APP_PAGES = 3; // 最少 3 页，第三页留空给用户自己拖
 function initAppPages() {
   var allKeys = ICONS_CONFIG.map(function(item) { return item.key; });
 
-  // 已有数据：校验 + 补齐槽位
   if (state.appPages && Array.isArray(state.appPages) && state.appPages.length > 0) {
     var existing = [];
     state.appPages.forEach(function(page) {
@@ -106,34 +119,50 @@ function initAppPages() {
     });
     var missing = allKeys.filter(function(k) { return existing.indexOf(k) === -1; });
 
-    if (missing.length === 0 && existing.length === allKeys.length && state.appPages.length >= MIN_APP_PAGES) {
-      // 补齐每页长度到 APP_PER_PAGE，并补足页数
-      state.appPages.forEach(function(page) {
-        while (page.length < APP_PER_PAGE) page.push(null);
-      });
-      while (state.appPages.length < MIN_APP_PAGES) {
-        var blank = [];
-        for (var z = 0; z < APP_PER_PAGE; z++) blank.push(null);
-        state.appPages.push(blank);
-      }
-      return;
+    while (state.appPages.length < MIN_APP_PAGES) {
+      var blank = [];
+      for (var z = 0; z < APP_PER_PAGE; z++) blank.push(null);
+      state.appPages.push(blank);
     }
-    // 数据对不上（新增了图标 / 页数不够），重置
-    state.appPages = null;
+    state.appPages.forEach(function(page) {
+      while (page.length < APP_PER_PAGE) page.push(null);
+    });
+
+    if (missing.length === 0) return;
+
+    // 智能补位：把新图标塞进空槽
+    var mi = 0;
+    for (var p = 0; p < state.appPages.length && mi < missing.length; p++) {
+      for (var s = 0; s < APP_PER_PAGE && mi < missing.length; s++) {
+        if (!state.appPages[p][s]) {
+          state.appPages[p][s] = missing[mi];
+          mi++;
+        }
+      }
+    }
+    while (mi < missing.length) {
+      var newPage = [];
+      for (var z2 = 0; z2 < APP_PER_PAGE; z2++) {
+        if (mi < missing.length) { newPage.push(missing[mi]); mi++; }
+        else newPage.push(null);
+      }
+      state.appPages.push(newPage);
+    }
+    saveState();
+    return;
   }
 
-  // 重新生成：第一页放全部图标，剩余页留空
+  // 全新用户
   var keys = allKeys.slice();
   var pages = [];
   var firstPage = keys.slice(0, APP_PER_PAGE);
   while (firstPage.length < APP_PER_PAGE) firstPage.push(null);
   pages.push(firstPage);
-
   var totalPages = Math.max(MIN_APP_PAGES, Math.ceil(keys.length / APP_PER_PAGE));
-  for (var p = 1; p < totalPages; p++) {
-    var page = keys.slice(p * APP_PER_PAGE, (p + 1) * APP_PER_PAGE);
-    while (page.length < APP_PER_PAGE) page.push(null);
-    pages.push(page);
+  for (var p2 = 1; p2 < totalPages; p2++) {
+    var page2 = keys.slice(p2 * APP_PER_PAGE, (p2 + 1) * APP_PER_PAGE);
+    while (page2.length < APP_PER_PAGE) page2.push(null);
+    pages.push(page2);
   }
   state.appPages = pages;
   saveState();
@@ -149,29 +178,45 @@ function renderAppIcons() {
   var oldPager = document.getElementById('homePager');
   if (oldPager) oldPager.remove();
 
-  // 外层容器（横向滚动）
   var container = document.createElement('div');
   container.id = 'homeSwiper';
   container.style.cssText = 'display:flex;width:100%;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;';
   container.style.scrollbarWidth = 'none';
 
-  // 每一页
   state.appPages.forEach(function(pageKeys, pageIdx) {
     var page = document.createElement('div');
     page.className = 'app-grid';
     page.dataset.pageIndex = pageIdx;
     page.style.cssText = 'flex-shrink:0;width:100%;scroll-snap-align:start;';
 
-    // 24 个槽位（不足补空）
+    // 先算出这一页被 widget 占用的格子
+    var occupiedSlots = {};
+    state.widgets.forEach(function(w) {
+      if (w.page !== pageIdx) return;
+      for (var wr = w.row; wr < w.row + w.rowSpan; wr++) {
+        for (var wc = w.col; wc < w.col + w.colSpan; wc++) {
+          occupiedSlots[wr * 4 + wc] = true;
+        }
+      }
+    });
+
     for (var slot = 0; slot < APP_PER_PAGE; slot++) {
+      // 被 widget 占用 → 只放占位空槽
+      if (occupiedSlots[slot]) {
+        var occupiedDiv = document.createElement('div');
+        occupiedDiv.className = 'app-icon-slot';
+        occupiedDiv.style.cssText = 'width:100%;height:82px;';
+        page.appendChild(occupiedDiv);
+        continue;
+      }
+
       var key = pageKeys[slot];
       if (!key) {
-        // 空槽
         var empty = document.createElement('div');
         empty.className = 'app-icon-slot';
         empty.dataset.pageIndex = pageIdx;
         empty.dataset.slotIndex = slot;
-        empty.style.cssText = 'width:100%;height:82px;'
+        empty.style.cssText = 'width:100%;height:82px;';
         page.appendChild(empty);
         continue;
       }
@@ -185,9 +230,9 @@ function renderAppIcons() {
       iconDiv.dataset.pageIndex = pageIdx;
       iconDiv.dataset.slotIndex = slot;
       iconDiv.dataset.appKey = key;
-           iconDiv.onclick = function() { 
+      iconDiv.onclick = function() {
         if (window.appEditMode) return;
-        navigateTo(this.dataset.appKey); 
+        navigateTo(this.dataset.appKey);
       };
 
       var imgDiv = document.createElement('div');
@@ -212,12 +257,72 @@ function renderAppIcons() {
     container.appendChild(page);
   });
 
-  // 插到主页的第一个位置
+  // 保存旧的滚动位置
+  var oldSwiper = document.getElementById('homeSwiper');
+  var oldScrollLeft = oldSwiper ? oldSwiper.scrollLeft : 0;
+
+  // 插到主页
   var mainContent = document.getElementById('pageHome');
   mainContent.innerHTML = '';
   mainContent.appendChild(container);
 
-    // 底部小点（只有超过 1 页才显示）
+  // 恢复滚动位置
+  if (oldScrollLeft > 0) {
+    container.scrollLeft = oldScrollLeft;
+    // 有时候 layout 还没算完，需要下一帧再设一次
+    requestAnimationFrame(function() {
+      container.scrollLeft = oldScrollLeft;
+      // 更新小点状态
+      var idx = Math.round(container.scrollLeft / container.offsetWidth);
+      var dots = document.querySelectorAll('#homePager span');
+      dots.forEach(function(d, i) {
+        d.style.background = (i === idx) ? 'var(--blue)' : 'rgba(0,0,0,0.15)';
+      });
+    });
+  }
+
+  // 渲染每一页里的小组件（绝对定位覆盖在网格上）
+  state.appPages.forEach(function(pageKeys, pageIdx) {
+    var pageEl = container.querySelector('.app-grid[data-page-index="' + pageIdx + '"]');
+    if (!pageEl) return;
+    pageEl.style.position = 'relative';
+
+    state.widgets.forEach(function(w) {
+      if (w.page !== pageIdx) return;
+      var pw = pageEl.clientWidth;
+      if (!pw) pw = pageEl.parentNode ? pageEl.parentNode.clientWidth : 390;
+      if (!pw) pw = 390;
+      var cellW = (pw - 32 - 12 * 3) / 4;
+      var cellH = 82;
+      var gapX = 12, gapY = 20, padL = 16, padT = 24;
+
+      var wEl = document.createElement('div');
+      wEl.className = 'home-widget';
+      wEl.dataset.widgetId = w.id;
+      wEl.style.position = 'absolute';
+      wEl.style.left = (padL + w.col * (cellW + gapX)) + 'px';
+      wEl.style.top = (padT + w.row * (cellH + gapY)) + 'px';
+      wEl.style.width = (w.colSpan * cellW + (w.colSpan - 1) * gapX) + 'px';
+      wEl.style.height = (w.rowSpan * cellH + (w.rowSpan - 1) * gapY) + 'px';
+      wEl.style.zIndex = '5';
+      wEl.style.borderRadius = '18px';
+      wEl.style.overflow = 'hidden';
+      wEl.innerHTML = renderWidgetInner(w.type, w.config);
+      wEl.addEventListener('click', (function(id) {
+        return function(ev) {
+          ev.stopPropagation();
+          if (window.appEditMode) return;
+          openWidgetFromHome(id);
+        };
+      })(w.id));
+
+            // 长按拖动（事件委托，在 initAppDragListeners 里统一处理）
+
+      pageEl.appendChild(wEl);
+    });
+  });
+
+  // 底部小点
   if (state.appPages.length > 1) {
     var pager = document.createElement('div');
     pager.id = 'homePager';
@@ -238,6 +343,13 @@ function renderAppIcons() {
       });
     });
   }
+
+  // 如果当前在编辑模式，让 widgets 也保持抖动
+  if (window.appEditMode) {
+    document.querySelectorAll('.home-widget').forEach(function(el) { el.classList.add('editing'); });
+  }
+
+  updateAppIconBadges();
 }
 
 // ===== 2. 渲染美化页的图标设置面板 =====
@@ -280,6 +392,7 @@ async function init() {
       if (d.statusUpdateAt === undefined) d.statusUpdateAt = 0;
     });
   }
+  initWidgetData();
   loadChatMessages();
   renderChatMessages();
   renderAll();
@@ -306,6 +419,15 @@ setInterval(checkAutoLetter, 3 * 60 * 60 * 1000);
       checkAssistantExpiry();
   setInterval(checkAssistantExpiry, 30000);
   startDreamStatusTicker();
+  initQuizData();
+    initMemoData();
+  checkMemoReminders();
+  setInterval(checkMemoReminders, 30000);
+  initAvatarData();
+  checkAvatarRandomChange();
+  setInterval(checkAvatarRandomChange, 5 * 60 * 1000);
+  updateAppIconBadges();
+  setInterval(updateAppIconBadges, 15000);
 }
 
 // ===== PERSISTENCE =====
@@ -371,6 +493,15 @@ function loadState() {
             if (parsed.cheatUsage) state.cheatUsage = parsed.cheatUsage;
             if (parsed.musicLibrary) state.musicLibrary = parsed.musicLibrary;
             if (parsed.giftItems) state.giftItems = parsed.giftItems;
+            if (parsed.memos) state.memos = parsed.memos;
+            if (parsed.quizQuestions) state.quizQuestions = parsed.quizQuestions;
+            if (parsed.widgets) state.widgets = parsed.widgets;
+            if (parsed.quizMeQuestions) state.quizMeQuestions = parsed.quizMeQuestions;
+            if (parsed.quizHistory) state.quizHistory = parsed.quizHistory;
+            if (parsed.avatarLibrary) state.avatarLibrary = parsed.avatarLibrary;
+            if (parsed.lastAvatarScan) state.lastAvatarScan = parsed.lastAvatarScan;
+            if (parsed.dreamRecall) state.dreamRecall = parsed.dreamRecall;
+            if (parsed.dreamRecallDone) state.dreamRecallDone = parsed.dreamRecallDone;
           } catch(err) {}
         }
         resolve();
@@ -410,6 +541,7 @@ function navigateTo(pageId) {
   // 2. 如果是主页，直接显示，结束
   if (pageId === 'pageHome') {
     document.querySelector('.main-content').style.display = 'block';
+    try { updateAppIconBadges(); } catch(e) {}
     return;
   }
   
@@ -444,6 +576,12 @@ function navigateTo(pageId) {
     if (pageId === 'pageWriteLetter') { /* 由 openWriteLetter 初始化 */ }
     if (pageId === 'pageFavorites') renderFavorites();
     if (pageId === 'pageDiary') { renderDiaryCover(); renderDiaryList(); }
+    if (pageId === 'pageDreamRecall') { window._drSelectedId = null; window._drStep = 'select'; window._drResult = null; renderDreamRecall(); }
+    if (pageId === 'pageQuiz') switchQuizTab('dream');
+    if (pageId === 'pageMemoList') renderMemoList();
+    if (pageId === 'pageAvatar') { window._avatarEditMode = false; window._avatarSelected = []; renderAvatarLib(); }
+    if (pageId === 'pageWidgets') { window._wdTab = 'small'; switchWidgetTab('small'); }
+    if (pageId === 'pageAddedWidgets') renderAddedWidgets();
     if (pageId === 'pageIconSettings') renderIconSettings();
     if (pageId === 'pagePrivateChat') { loadChatMessages(); renderChat(); }
     if (pageId === 'pageCreateGroup') createGroupChat();
@@ -541,6 +679,7 @@ function openEditDreamRole(id) {
     document.getElementById('dreamAvatarPreview').src = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2780%27 height=%2780%27 viewBox=%270 0 80 80%27%3E%3Ccircle cx=%2740%27 cy=%2740%27 r=%2740%27 fill=%27%23ffe0e8%27/%3E%3Ctext x=%2740%27 y=%2744%27 text-anchor=%27middle%27 fill=%27%23d6336c%27 font-size=%2728%27%3E💜%3C/text%3E%3C/svg%3E';
   }
   
+    window._dreamStatusCollapsed = true;
   renderDreamStatusList();
   navigateTo('pageEditDreamRole');
 }
@@ -982,24 +1121,9 @@ function renderCheckinHistory() {
   list.innerHTML = state.checkinHistory.slice().reverse().map(c => {
     const time = new Date(c.timestamp);
     const timeStr = time.getMonth()+1 + '/' + time.getDate() + ' ' + String(time.getHours()).padStart(2,'0') + ':' + String(time.getMinutes()).padStart(2,'0');
-
-    // 优先用 dreamId 反查最新名字（这样改名后立即生效）
-    var dname = '';
-    if (c.dreamId) {
-      var d = state.dreams.find(function(x) { return x.id === c.dreamId; });
-      if (d && d.name) dname = d.name;
-    }
-    // 查不到就退回存的旧名字
-    if (!dname && c.dreamName && c.dreamName !== '梦角') dname = c.dreamName;
-    // 只有一个梦角的话，直接用
-    if (!dname && state.dreams && state.dreams.length === 1) {
-      dname = state.dreams[0].name;
-    }
-    if (!dname) dname = '梦角';
-
     return `<div class="history-item">
       <div class="hi-left">
-       <div class="hi-main">${dname}：${c.message || '查岗消息'}</div>
+       <div class="hi-main">${c.dreamName || '梦角'}：${c.message || '查岗消息'}</div>
         <div class="hi-time">${timeStr}</div>
       </div>
     </div>`;
@@ -1744,8 +1868,8 @@ if (hasCards && hasStickers) {
     }
   }
 
-  // ===== 梦角主动收藏用户消息（30% 概率） =====
-  if (Math.random() < 0.30) {
+  // ===== 梦角主动收藏用户消息（10% 概率） =====
+  if (Math.random() < 0.10) {
     var userMsgs2 = [];
     for (var fi = chatMessages.length - 1; fi >= 0 && userMsgs2.length < 5; fi--) {
       if (chatMessages[fi] && chatMessages[fi].from === 'user') userMsgs2.push(chatMessages[fi]);
@@ -1940,6 +2064,8 @@ if (_lastMsg && _lastMsg.from === 'dream' && Math.random() < 0.03) {
     }
   } 
 
+    // 梦角主动发问卷（5% 概率）
+  maybeSendQuizQuestion(senderId);
   renderChatMessages();
 saveChatMessages();
 // 【修复】：找到真正的发件人名字
@@ -2708,6 +2834,103 @@ function renderChatMessages() {
       continue; 
     }
 
+    // 问卷卡片
+    if (m.type === 'quiz') {
+      var isMineQ = m.from === 'user';
+      var isMeAsk = m.isMeAsk === true;
+      var hasAns = m.answers && m.answers.length > 0;
+
+      var titleText = '问卷';
+      var subText = '';
+      var actionText = '点击填写 →';
+
+      if (isMeAsk) {
+        // 用户向梦角提问
+        var answererName = '梦角';
+        if (m.answererId) {
+          var _dQ = state.dreams.find(function(x) { return x.id === m.answererId; });
+          if (_dQ) answererName = _dQ.name;
+        }
+        titleText = hasAns ? '已回答问卷' : '我提问';
+        subText = hasAns
+          ? answererName + ' 已回答了你的问题'
+          : '我向 ' + answererName + ' 提了 ' + m.questions.length + ' 个问题';
+        actionText = hasAns ? '点击查看答案 →' : '等待回答中…';
+      } else {
+        // 梦角向用户提问
+        titleText = hasAns ? '已作答问卷' : '问卷';
+        subText = hasAns
+          ? '我已回答了 ' + m.askerName + ' 的提问'
+          : m.askerName + ' 向你提了 ' + m.questions.length + ' 个问题';
+        actionText = hasAns ? '点击查看答案 →' : '点击填写 →';
+      }
+
+      var qHtml = '<div data-msg-index="' + i + '" style="display:flex;justify-content:' + (isMineQ ? 'flex-end' : 'flex-start') + ';margin-bottom:10px;">';
+      qHtml += '<div onclick="openQuizAnswerModal(\'' + m.packetId + '\')" class="quiz-card-msg">';
+      qHtml += '<div style="display:flex;align-items:center;margin-bottom:6px;">';
+      qHtml += '<span class="quiz-card-icon">📋</span>';
+      qHtml += '<span class="quiz-card-title">' + titleText + '</span>';
+      qHtml += '</div>';
+      qHtml += '<div class="quiz-card-sub">' + subText + '</div>';
+      qHtml += '<div class="quiz-card-sub" style="margin-top:4px;color:#007aff;">' + actionText + '</div>';
+      qHtml += '</div>';
+      qHtml += '</div>';
+      html += qHtml;
+      continue;
+    }
+
+    // 备忘录提醒卡片
+    if (m.type === 'memo') {
+      var mHtml = '<div data-msg-index="' + i + '" style="display:flex;justify-content:flex-start;margin-bottom:10px;">';
+      mHtml += '<div onclick="openMemoDetail(\'' + m.packetId + '\')" style="cursor:pointer;width:230px;background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 4px 14px rgba(0,0,0,0.08);border:1px solid rgba(0,0,0,0.05);">';
+      mHtml += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">';
+      mHtml += '<span style="font-size:20px;">📝</span>';
+      mHtml += '<span style="font-size:13px;font-weight:600;color:#1d1d1f;">备忘录提醒</span>';
+      mHtml += '</div>';
+      var previewMemo = (m.content || '').replace(/\n/g, ' ');
+      if (previewMemo.length > 40) previewMemo = previewMemo.slice(0, 40) + '…';
+      mHtml += '<div style="font-size:13px;color:#333;line-height:1.5;margin-bottom:8px;word-break:break-word;">' + escapeHtml(previewMemo) + '</div>';
+      mHtml += '<div style="font-size:11px;color:#86868b;">⏰ ' + escapeHtml(m.remindAt || '') + '</div>';
+      mHtml += '</div>';
+      mHtml += '</div>';
+      html += mHtml;
+      continue;
+    }
+
+    // 抉择卡片
+    if (m.type === 'choice') {
+      var isMineC = m.from === 'user';
+      var hasAnsC = !!m.answer;
+      var cHtml = '<div data-msg-index="' + i + '" style="display:flex;justify-content:' + (isMineC ? 'flex-end' : 'flex-start') + ';margin-bottom:10px;">';
+      cHtml += '<div style="width:230px;background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 4px 14px rgba(0,0,0,0.08);border:1px solid rgba(0,0,0,0.05);">';
+      cHtml += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">';
+      cHtml += '<span style="font-size:20px;">⚖️</span>';
+      cHtml += '<span style="font-size:13px;font-weight:600;color:#1d1d1f;">抉择</span>';
+      cHtml += '</div>';
+      cHtml += '<div style="font-size:13px;color:#333;line-height:1.5;margin-bottom:10px;word-break:break-word;">' + escapeHtml(m.question) + '</div>';
+      cHtml += '<div style="display:flex;flex-direction:column;gap:6px;">';
+      m.options.forEach(function(opt) {
+        var isPicked = hasAnsC && m.answer === opt;
+        var optStyle = 'font-size:12px;padding:6px 10px;border-radius:8px;';
+        if (isPicked) {
+          optStyle += 'background:rgba(0,122,255,0.12);color:#007aff;font-weight:600;border:1px solid rgba(0,122,255,0.3);';
+        } else {
+          optStyle += 'background:#f8f8fa;color:#666;border:1px solid transparent;';
+        }
+        cHtml += '<div style="' + optStyle + '">' + (isPicked ? '✓ ' : '') + escapeHtml(opt) + '</div>';
+      });
+      cHtml += '</div>';
+      if (!hasAnsC) {
+        cHtml += '<div style="font-size:11px;color:#86868b;margin-top:8px;">等待回答中…</div>';
+      } else {
+        cHtml += '<div style="font-size:11px;color:#86868b;margin-top:8px;">' + escapeHtml(m.answererName || '梦角') + ' 选择了</div>';
+      }
+      cHtml += '</div>';
+      cHtml += '</div>';
+      html += cHtml;
+      continue;
+    }
+
     // 3. 拍一拍消息（第二优先级，直接拦截，绝对不画气泡！）
     if (m.type === 'poke') {
       var pokeSenderName = m.senderName || (m.from === 'user' ? '我' : '梦角');
@@ -2906,12 +3129,20 @@ function renderChatList() {
         var h = d.getHours(), m = d.getMinutes();
         time = (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
       }
+            var unreadG = 0;
+      if (!state.mutedChats || state.mutedChats.indexOf(g.id) === -1) {
+        var lastReadG = (state.lastReadAt && state.lastReadAt[g.id]) || 0;
+        (state.chatSessions[g.id] || []).forEach(function(x) {
+          if (x.from === 'dream' && x.time > lastReadG) unreadG++;
+        });
+      }
+      var badgeG = unreadG > 0 ? '<span style="display:inline-block;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#ff3b30;color:#fff;font-size:10px;font-weight:600;line-height:16px;text-align:center;margin-left:6px;vertical-align:middle;box-sizing:border-box;">' + (unreadG > 99 ? '99+' : unreadG) + '</span>' : '';
       html += `
         <div class="chat-list-item" onclick="openChat('${g.id}')">
           <img class="chat-list-avatar" src="${g.avatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2750%27 height=%2750%27 viewBox=%270 0 50 50%27%3E%3Ccircle cx=%2725%27 cy=%2725%27 r=%2725%27 fill=%27%23dff0ff%27/%3E%3Ctext x=%2725%27 y=%2730%27 text-anchor=%27middle%27 fill=%27%23007aff%27 font-size=%2720%27%3E👥%3C/text%3E%3C/svg%3E'}">
           <div class="chat-list-info">
             <div class="chat-list-top">
-              <span class="chat-list-name">${g.name} (${g.memberIds.length})${state.mutedChats && state.mutedChats.indexOf(g.id) === -1 && state.chatSessions[g.id] && state.chatSessions[g.id].some(function(x){return x.from==='dream' && x.time > (state.lastReadAt && state.lastReadAt[g.id] || 0)}) ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff3b30;margin-left:6px;vertical-align:middle;"></span>' : ''}</span>
+              <span class="chat-list-name">${g.name} (${g.memberIds.length})${badgeG}</span>
               <span class="chat-list-time">${time}</span>
             </div>
             <div class="chat-list-preview">${preview}</div>
@@ -2939,7 +3170,16 @@ function renderChatList() {
           <img class="chat-list-avatar" src="${avatar}">
           <div class="chat-list-info">
             <div class="chat-list-top">
-             <span class="chat-list-name">${d.name}${d.currentStatus ? '<span style="font-size:11px;color:var(--gray);font-weight:400;margin-left:6px;">' + d.currentStatus + '</span>' : ''}${state.mutedChats && state.mutedChats.indexOf(d.id) === -1 && state.chatSessions[d.id] && state.chatSessions[d.id].some(function(x){return x.from==='dream' && x.time > (state.lastReadAt && state.lastReadAt[d.id] || 0)}) ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff3b30;margin-left:6px;vertical-align:middle;"></span>' : ''}</span>
+             <span class="chat-list-name">${d.name}${d.currentStatus ? '<span style="font-size:11px;color:var(--gray);font-weight:400;margin-left:6px;">' + d.currentStatus + '</span>' : ''}${(() => {
+               if (state.mutedChats && state.mutedChats.indexOf(d.id) > -1) return '';
+               var lr = (state.lastReadAt && state.lastReadAt[d.id]) || 0;
+               var cnt = 0;
+               (state.chatSessions[d.id] || []).forEach(function(x) {
+                 if (x.from === 'dream' && x.time > lr) cnt++;
+               });
+               if (cnt === 0) return '';
+               return '<span style="display:inline-block;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#ff3b30;color:#fff;font-size:10px;font-weight:600;line-height:16px;text-align:center;margin-left:6px;vertical-align:middle;box-sizing:border-box;">' + (cnt > 99 ? '99+' : cnt) + '</span>';
+             })()}</span>
               <span class="chat-list-time">${time}</span>
             </div>
             <div class="chat-list-preview">${preview}</div>
@@ -2953,6 +3193,7 @@ function renderChatList() {
     html = '<div class="empty-state">还没有聊天对象，快去添加梦角或建群吧！</div>';
   }
   container.innerHTML = html;
+  try { updateAppIconBadges(); } catch(e) {}
 }
 
 // ===== 打开指定梦角的聊天窗口 =====
@@ -2987,6 +3228,7 @@ function openChat(id) {
   
   // 强制跳转到私聊页面
   navigateTo('pagePrivateChat');
+  try { updateAppIconBadges(); } catch(e) {}
 }
 
 // ===== 群聊占位（第三阶段实现） =====
@@ -5041,24 +5283,23 @@ function saveUserDiary() {
 function checkAutoDiary() {
   if (!state.dreams || state.dreams.length === 0) return;
   if (!state.diaries) state.diaries = [];
-  var today = new Date().toISOString().slice(0, 10);
+  var now = Date.now();
+  var SIX_HOURS = 6 * 60 * 60 * 1000;
 
   state.dreams.forEach(function(d) {
-    // 检查今天真实写了几篇，限制最多 2 篇
-var todayCount = state.diaries.filter(function(diary) {
-  if (diary.authorId !== d.id) return false;
-  // 【核心修复】：从日记 ID 中提取真实的生成时间戳 (格式: diary_时间戳_随机数)
-  var createdTs = parseInt((diary.id || '').split('_')[1]);
-  if (!createdTs || isNaN(createdTs)) {
-    createdTs = diary.time || Date.now(); // 兼容以前的老日记
-  }
-  var diaryDate = new Date(createdTs).toISOString().slice(0, 10);
-  return diaryDate === today;
-}).length;
-if (todayCount >= 2) return;
+    // 找这个梦角最近一篇日记的时间
+    var lastTime = 0;
+    state.diaries.forEach(function(diary) {
+      if (diary.authorId !== d.id) return;
+      var t = parseInt((diary.id || '').split('_')[1]) || diary.time || 0;
+      if (t > lastTime) lastTime = t;
+    });
 
-    // 每天有 20% 概率在扫描时触发（保证一天至少一篇，最多几篇）
-    if (Math.random() > 0.2) return;
+    // 距离上次不足 6 小时 → 跳过
+    if (now - lastTime < SIX_HOURS) return;
+
+    // 30% 概率写一篇
+    if (Math.random() > 0.30) return;
 
     // 从字卡里随机选 3-8 条
     if (!state.cards || state.cards.length === 0) return;
@@ -5078,16 +5319,12 @@ if (todayCount >= 2) return;
       text: text,
       mood: mood,
       weather: weather,
-      time: Date.now() - Math.floor(Math.random() * 3600000 * 12), // 随机往前推一点时间
+      time: Date.now(),
       comments: []
     });
     saveState();
   });
 }
-
-// 定时扫描
-setInterval(checkAutoDiary, 60000);
-setInterval(checkAutoDiaryComments, 60000);
 
 // ===== 日记评论 =====
 function openDiaryComment(diaryId) {
@@ -5147,48 +5384,35 @@ function triggerAiComment(diaryId, replyToAuthorId) {
   if (!state.dreams || state.dreams.length === 0) return;
   if (!state.cards || state.cards.length === 0) return;
 
-  // 随机挑一个梦角（不能是日记作者自己）
+  // 随机挑一个梦角（不能是日记作者）
   var candidates = state.dreams.filter(function(d) { return d.id !== diary.authorId; });
   if (candidates.length === 0) return;
   var dream = candidates[Math.floor(Math.random() * candidates.length)];
 
-  // 【核心修复】：限制每个梦角在这篇日记下的总评论数（含回复）最多 3 条
-if (!diary.comments) diary.comments = [];
-var myTotalComments = diary.comments.filter(function(c) {
-  return c.authorId === dream.id;
-}).length;
-if (myTotalComments >= 3) return;
-  
-  // 主动评论次数上限 2 次
   if (!diary.comments) diary.comments = [];
-  var myActiveCount = diary.comments.filter(function(c) {
+
+  // 统计该梦角在这篇日记下：主动评论数 & 回复数
+  var activeCount = diary.comments.filter(function(c) {
     return c.authorId === dream.id && !c.replyTo;
+  }).length;
+  var replyCount = diary.comments.filter(function(c) {
+    return c.authorId === dream.id && c.replyTo;
   }).length;
 
   var isReply = false;
   var replyTo = null;
-  var replyProb = 0;
 
-  // 如果是回复用户/别人，40% 概率
-  if (replyToAuthorId && myActiveCount < 2) {
-    replyProb = 0.4;
-    if (Math.random() < replyProb) {
-      isReply = true;
-    }
-  }
-
-  // 如果已经主动评论了 2 次，必须回复
-  if (myActiveCount >= 2) {
+  if (replyToAuthorId) {
+    // 回复别人
+    if (replyCount >= 2) return; // 回复上限 2 次
+    if (Math.random() > 0.5) return; // 50% 概率回复
     isReply = true;
-    if (Math.random() > 0.2) return; // 20% 概率才真回复
+  } else {
+    // 主动评论
+    if (activeCount >= 2) return; // 主动上限 2 条
+    if (Math.random() > 0.4) return; // 40% 概率主动评论
   }
 
-  // 主动评论的概率：85%
-  if (!isReply && myActiveCount === 0) {
-    if (Math.random() > 0.85) return;
-  }
-
-  // 选一条字卡
   var card = state.cards[Math.floor(Math.random() * state.cards.length)];
   var text = card ? card.text : '……';
 
@@ -5201,9 +5425,7 @@ if (myTotalComments >= 3) return;
     time: Date.now()
   };
 
-  // 如果回复别人，加上 replyTo
   if (isReply) {
-    // 找最后一条不是自己发的评论来回复
     var others = diary.comments.filter(function(c) { return c.authorId !== dream.id; });
     if (others.length === 0) return;
     var target = others[others.length - 1];
@@ -5216,44 +5438,6 @@ if (myTotalComments >= 3) return;
   if (document.getElementById('pageDiary').classList.contains('active')) {
     renderDiaryList();
   }
-
-  // 被回复者再回复：20% 概率
-  if (isReply && comment.replyTo) {
-    var targetCmt = diary.comments.find(function(c) { return c.id === comment.replyTo; });
-    if (targetCmt && Math.random() < 0.2) {
-      setTimeout(function() {
-        // 再找一个别的梦角来回复这条
-        var another = candidates.filter(function(d) { return d.id !== dream.id; });
-        if (another.length === 0) return;
-        var another2 = another[Math.floor(Math.random() * another.length)];
-        var card2 = state.cards[Math.floor(Math.random() * state.cards.length)];
-        diary.comments.push({
-          id: 'cmt_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-          authorId: another2.id,
-          authorName: another2.name,
-          authorAvatar: another2.avatar || '',
-          text: card2 ? card2.text : '……',
-          replyTo: comment.id,
-          replyToName: comment.authorName,
-          time: Date.now()
-        });
-        saveState();
-        if (document.getElementById('pageDiary').classList.contains('active')) renderDiaryList();
-      }, 3000 + Math.random() * 3000);
-    }
-  }
-}
-
-// 定时让梦角主动评论日记（每 60 秒扫一次）
-function checkAutoDiaryComments() {
-  if (!state.diaries || state.diaries.length === 0) return;
-  // 只处理最近 5 篇日记
-  var recent = state.diaries.slice().sort(function(a, b) { return b.time - a.time; }).slice(0, 5);
-  recent.forEach(function(diary) {
-    if (Math.random() < 0.15) {
-      triggerAiComment(diary.id, null);
-    }
-  });
 }
 // ===== 主屏幕背景 =====
 function handleHomeBg(e) {
@@ -5935,6 +6119,9 @@ function exitAppEditMode() {
   if (!window.appEditMode) return;
   window.appEditMode = false;
   document.querySelectorAll('.app-grid').forEach(function(g) { g.classList.remove('editing'); });
+  document.querySelectorAll('.home-widget').forEach(function(el) { el.classList.remove('editing'); });
+  var w = document.getElementById('anniversaryWidget');
+  if (w) w.classList.remove('editing');
   saveState();
 }
 
@@ -5954,7 +6141,11 @@ function getPageFromPoint(clientX, clientY) {
   if (!grid) return null;
 
   var gridRect = grid.getBoundingClientRect();
-  var padLeft = 16, padTop = 24, gapX = 12, gapY = 20;
+  var cs = window.getComputedStyle(grid);
+  var padTop = parseFloat(cs.paddingTop) || 24;
+  var padLeft = parseFloat(cs.paddingLeft) || 16;
+  var gapX = parseFloat(cs.columnGap) || 12;
+  var gapY = parseFloat(cs.rowGap) || 20;
   var cellW = (gridRect.width - padLeft * 2 - gapX * 3) / 4;
   var cellH = 82 + gapY;
 
@@ -5963,7 +6154,7 @@ function getPageFromPoint(clientX, clientY) {
   if (col < 0) col = 0; if (col > 3) col = 3;
   if (row < 0) row = 0; if (row > 5) row = 5;
 
-  return { page: pageIdx, slot: row * 4 + col };
+  return { page: pageIdx, row: row, col: col, slot: row * 4 + col };
 }
 
 function findAppKey(page, slot) {
@@ -6023,7 +6214,7 @@ function onIconPressStart(e, iconEl) {
       iconEl: appPressTarget
     };
     if (navigator.vibrate) navigator.vibrate(30);
-  }, 400);
+  }, 600);
 }
 
 function onIconPressMove(e) {
@@ -6061,88 +6252,132 @@ function onIconPressEnd(e) {
 
   var touch = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
   var target = getPageFromPoint(touch.clientX, touch.clientY);
-  if (target) {
+
+  // 目标格是否被 widget 占用
+  var blocked = false;
+  if (target && state.widgets) {
+    for (var wi = 0; wi < state.widgets.length; wi++) {
+      var w = state.widgets[wi];
+      if (w.page !== target.page) continue;
+      if (target.row >= w.row && target.row < w.row + w.rowSpan &&
+          target.col >= w.col && target.col < w.col + w.colSpan) {
+        blocked = true; break;
+      }
+    }
+  }
+
+  if (target && !blocked) {
     swapAppKeys(appDragState.fromPage, appDragState.fromSlot, target.page, target.slot);
+  } else {
+    showToast('这个位置放不下哦');
   }
   if (appDragGhost) { appDragGhost.remove(); appDragGhost = null; }
   if (appDragState.iconEl) appDragState.iconEl.classList.remove('dragging');
   appDragState = null;
   appPressTarget = null;
 
+  appPressStartX = 0;
+  appPressStartY = 0;
+
   renderAppIcons();
   if (window.appEditMode) {
     document.querySelectorAll('.app-grid').forEach(function(g) { g.classList.add('editing'); });
+    document.querySelectorAll('.home-widget').forEach(function(el) { el.classList.add('editing'); });
   }
 }
 
 // 全局事件委托——只绑一次，永不丢失
 (function initAppDragListeners() {
-  function findIcon(el) {
+  function findAppIcon(el) {
     while (el && el !== document.body) {
       if (el.classList && el.classList.contains('app-icon')) return el;
       el = el.parentNode;
     }
     return null;
   }
+  function findWidget(el) {
+    while (el && el !== document.body) {
+      if (el.classList && el.classList.contains('home-widget')) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
 
+  // ===== touch 事件 =====
   document.addEventListener('touchstart', function(e) {
-    var icon = findIcon(e.target);
+    var widget = findWidget(e.target);
+    if (widget) { onWdgPressStart(e, widget); return; }
+    var icon = findAppIcon(e.target);
     if (icon) onIconPressStart(e, icon);
-  }, { passive: false, capture: true });
+  }, { passive: true });
 
   document.addEventListener('touchmove', function(e) {
+    if (window._wdPressTarget || window._wdDragState) { onWdgPressMove(e); return; }
     if (!appPressTarget && !appDragState) return;
     onIconPressMove(e);
   }, { passive: false });
 
   document.addEventListener('touchend', function(e) {
+    if (window._wdPressTarget || window._wdDragState) { onWdgPressEnd(e); return; }
     if (!appPressTarget && !appDragState) return;
     onIconPressEnd(e);
   });
 
   document.addEventListener('touchcancel', function(e) {
+    if (window._wdPressTarget || window._wdDragState) { onWdgPressEnd(e); return; }
     if (!appPressTarget && !appDragState) return;
     onIconPressEnd(e);
   });
 
+  // ===== mouse 事件 =====
   document.addEventListener('mousedown', function(e) {
-    var icon = findIcon(e.target);
+    var widget = findWidget(e.target);
+    if (widget) { onWdgPressStart(e, widget); return; }
+    var icon = findAppIcon(e.target);
     if (icon) onIconPressStart(e, icon);
   });
 
   document.addEventListener('mousemove', function(e) {
+    if (window._wdPressTarget || window._wdDragState) { onWdgPressMove(e); return; }
     if (!appPressTarget && !appDragState) return;
     onIconPressMove(e);
   });
 
   document.addEventListener('mouseup', function(e) {
+    if (window._wdPressTarget || window._wdDragState) { onWdgPressEnd(e); return; }
     if (!appPressTarget && !appDragState) return;
     onIconPressEnd(e);
   });
 })();
 
+// 兼容旧调用（空的，因为现在用事件委托）
+function bindAppDrag() {}
+
 // 点击空白处退出编辑模式
 document.addEventListener('click', function(e) {
   if (!window.appEditMode) return;
-  if (appDragState) return;
-  if (e.target.closest && e.target.closest('.app-icon')) return;
+  if (appDragState || window._wdDragState) return;
+  if (e.target.closest && (e.target.closest('.app-icon') || e.target.closest('.home-widget'))) return;
   var pageHome = document.getElementById('pageHome');
   if (!pageHome) return;
   if (pageHome.offsetParent === null) return;
   exitAppEditMode();
 });
 
-// 兼容旧调用（空的，因为现在用事件委托）
-function bindAppDrag() {}
-
-// 点击空白退出编辑模式
-document.addEventListener('click', function(e) {
+// 手机端兜底：单击空白区也退出
+document.addEventListener('touchend', function(e) {
   if (!window.appEditMode) return;
-  if (appDragState) return;
-  var home = document.getElementById('pageHome');
-  if (!home || home.style.display === 'none') return;
-  if (e.target.closest('.app-icon')) return;
-  exitAppEditMode();
+  if (appDragState || window._wdDragState) return;
+  if (window._wdPressTarget || appPressTarget) return;
+  var el = e.target;
+  if (el.closest && (el.closest('.app-icon') || el.closest('.home-widget'))) return;
+  var pageHome = document.getElementById('pageHome');
+  if (!pageHome) return;
+  if (pageHome.offsetParent === null) return;
+  // 延迟一点，让可能的 click 先处理
+  setTimeout(function() {
+    if (window.appEditMode) exitAppEditMode();
+  }, 50);
 });
 
 // ===== 状态检测 =====
@@ -8780,6 +9015,16 @@ function startDreamStatusTicker() {
   setInterval(tickDreamStatus, 5 * 60 * 1000);
 }
 
+window._dreamStatusCollapsed = true;
+
+function toggleDreamStatusCollapse() {
+  window._dreamStatusCollapsed = !window._dreamStatusCollapsed;
+  var body = document.getElementById('dreamStatusBody');
+  var arrow = document.getElementById('dreamStatusArrow');
+  if (body) body.style.display = window._dreamStatusCollapsed ? 'none' : 'block';
+  if (arrow) arrow.style.transform = window._dreamStatusCollapsed ? '' : 'rotate(180deg)';
+}
+
 // ===== 编辑页状态池 =====
 function renderDreamStatusList() {
   var d = state.dreams.find(function(x) { return x.id === state.currentEditDreamId; });
@@ -8787,6 +9032,16 @@ function renderDreamStatusList() {
   if (!d.statuses) d.statuses = [];
   var list = document.getElementById('dreamStatusList');
   if (!list) return;
+    // 更新计数
+  var cntEl = document.getElementById('dreamStatusCount');
+  if (cntEl) cntEl.textContent = d.statuses.length;
+
+  // 恢复折叠状态
+  var body = document.getElementById('dreamStatusBody');
+  var arrow = document.getElementById('dreamStatusArrow');
+  if (body) body.style.display = window._dreamStatusCollapsed ? 'none' : 'block';
+  if (arrow) arrow.style.transform = window._dreamStatusCollapsed ? '' : 'rotate(180deg)';
+
   if (d.statuses.length === 0) {
     list.innerHTML = '<div style="font-size:12px;color:var(--gray);padding:6px 0;">还没有状态，添加一条试试</div>';
     return;
@@ -8843,4 +9098,3635 @@ function deleteDreamStatus(i) {
   if (d.currentStatus === removed) d.currentStatus = '';
   saveState();
   renderDreamStatusList();
+}
+
+// ===== 梦境回忆系统 =====
+var DREAM_CLUE_WORDS = [
+  '蝴蝶','月亮','深林','镜子','雨','河流','旧屋','钥匙','钟表','云端',
+  '楼梯','烛火','飞鸟','猫','门','电话','火车','风铃','大海','雪花',
+  '影子','光','隧道','书页','戒指','玻璃','星星','桥','树屋','窗',
+  '照片','雨伞','鲸鱼','沙漏','信箱','花海','纸飞机','风','列车站','灯塔',
+  '人偶','素描','雨天','黄昏','紫罗兰','棉花糖','墨水','羽毛','玻璃球','耳机',
+  '围巾','咖啡杯','糖纸','邮票','蜡烛','灯笼','苹果','水果','欲望','你','其他人','床','情书','爱','小狗','暗号','二人世界','传讯','无法言语','想你','分离','美梦','噩梦','婚礼','工作','模糊','山','水','火','风','雨','雪','雷','电','日','月','星','云','花','草','树','木','林','海','河','湖','江','川','泉','石','土','田','路','桥','车','船','家','门','窗','床','桌','椅','灯','书','笔','纸','画','歌','舞','心','头','手','脚','眼','耳','口','鼻','牙','舌','脸','天空','大地','太阳','月亮','星星','白云','乌云','风雨','雷电','闪电','彩虹','露水','冰雪','雪花','河流','大海','湖泊','山川','山峰','山谷','森林','草原','沙漠','田野','土地','石头','沙子','泥土','泉水','瀑布','海浪','空气','阳光','月光','星光','火光','灯光','春风','蓝天','青山','绿水','大树','小草','小鸟','小鱼','老虎','狮子','大象','熊猫','猴子','今天','明天','昨天','后天','前天','早上','上午','中午','下午','傍晚','晚上','夜晚','白天','黑夜','时间','时候','年代','岁月','季节','春天','夏天','秋天','冬天','周末','星期','小时','分钟','现在','过去','未来','以前','以后','最近','马上','立刻','忽然','突然','经常','一直','总是','有时','每天','每年','每月','每周','当天','当日','此时','那时','平日','爸爸','妈妈','爷爷','奶奶','哥哥','姐姐','弟弟','妹妹','叔叔','阿姨','舅舅','姑姑','孩子','大人','老人','朋友','同学','老师','学生','医生','护士','警察','工人','农民','商人','司机','厨师','律师','作家','画家','歌手','演员','记者','士兵','领导','同事','邻居','客人','主人','男人','女人','男孩','女孩','青年','少年','儿童','家人','亲人','爱人','自己','身体','头发','眼睛','眉毛','鼻子','耳朵','嘴巴','嘴唇','舌头','牙齿','脖子','肩膀','胳膊','手指','手掌','拳头','肚子','后背','膝盖','脚趾','皮肤','骨头','肌肉','血液','心脏','大脑','头脑','面孔','脸色','眼神','声音','笑容','眼泪','汗水','力气','精神','体力','健康','疾病','伤口','体温','呼吸','心跳','脉搏','神经','细胞','器官','骨骼','脂肪','毛发','走路','跑步','跳跃','爬行','飞翔','游泳','吃饭','喝水','睡觉','起床','洗澡','刷牙','洗脸','穿衣','脱衣','开门','关门','坐下','站立','躺下','抬头','低头','回头','转身','举手','招手','拍手','握手','拥抱','微笑','大笑','哭泣','说话','聊天','唱歌','跳舞','读书','写字','画画','工作','学习','休息','玩耍','思考','记住','忘记','喜欢','讨厌','害怕','高兴','桌子','椅子','凳子','床铺','柜子','箱子','盒子','袋子','瓶子','杯子','盘子','碗筷','勺子','筷子','刀子','叉子','锅子','炉子','水壶','茶壶','茶杯','酒杯','饭碗','菜盘','汤匙','扫帚','拖把','抹布','水桶','脸盆','毛巾','牙刷','牙膏','肥皂','镜子','梳子','剪子','尺子','笔筒','书本','纸张','信封','邮票','日历','钟表','手表','眼镜','帽子','衣服','裤子','裙子','衬衫','外套','大衣','毛衣','袜子','鞋子','围巾','手套','腰带','米饭','面条','馒头','包子','饺子','馄饨','大饼','油条','豆浆','稀饭','炒饭','炒面','鸡蛋','鸭蛋','牛奶','酸奶','豆腐','青菜','白菜','萝卜','土豆','番茄','黄瓜','茄子','辣椒','大葱','大蒜','生姜','苹果','香蕉','橘子','橙子','葡萄','西瓜','桃子','梨子','草莓','樱桃','菠萝','芒果','柠檬','水果','蔬菜','牛肉','猪肉','羊肉','鸡肉','鱼肉','虾仁','螃蟹','汽车','火车','飞机','轮船','单车','摩托','公交','出租','地铁','高铁','车站','机场','码头','道路','公路','铁路','桥梁','隧道','街道','巷子','广场','公园','学校','医院','银行','商店','市场','超市','酒店','宾馆','餐厅','饭店','书店','影院','剧院','场馆','乐园','花园','果园','菜园','城市','乡村','农村','国家','世界','中国','外国','地方','地址','方向','问题','答案','方法','办法','原因','结果','计划','目标','理想','梦想',
+  '爱','恋','情','缘','心','想','念','思','慕','追','约','吻','抱','牵','疼','宠','甜','蜜','暖','柔','娇','羞','痴','醉','迷','盼','望','守','伴','陪','依','靠','拥','亲','搂','婚','嫁','娶','妻','夫','郎','娘','君','卿','双','对','聚','逢','遇','见',
+'恋爱','爱情','恋人','情侣','伴侣','爱人','对象','男友','女友','老公','老婆','妻子','丈夫','夫妻','未婚','已婚','新婚','婚礼','婚宴','婚戒','婚纱','婚房','婚车','订婚','求婚','结婚','离婚','分手','和好','复合','告白','表白','示爱','求爱','追求','追爱','约会','相亲','相恋','相爱','相思','相守','相伴','相依','相拥','相吻','牵手','拥抱','亲吻','接吻',
+'吻别','初吻','初恋','初爱','热恋','暗恋','单恋','苦恋','虐恋','迷恋','痴恋','眷恋','依恋','爱恋','贪恋','留恋','思恋','恋慕','爱慕','倾慕','仰慕','心动','心跳','心仪','心爱','心疼','心醉','心碎','心伤','心冷','心暖','心安','心定','心乱','心慌','心念','心想','心愿','心事','心情','心声','心意','心思','心弦','心扉','心田','心海','心间','心底','心中',
+'心里','心尖','心肝','宝贝','宝宝','乖乖','亲爱的','甜心','甜蜜','甜美','甜言','蜜语','温柔','温暖','温存','温情','浪漫','情调','情话','情书','情诗','情歌','情缘','情分','情意','情义','情爱','情感','感情','情绪','情怀','情结','情网','情劫','情债','情伤','情泪','情痴','情种','情圣','情人','情敌','情场','情路','缘分','有缘','无缘','天缘','良缘','姻缘',
+'奇缘','偶遇','相遇','邂逅','初见','一见','钟情','钟爱','中意','看中','看上','喜欢','喜爱','爱护','爱惜','疼爱','宠爱','溺爱','偏爱','挚爱','真爱','深爱','热爱','承诺','誓言','誓约','盟约','诺言','约定','山盟','海誓','永恒','永远','长久','白头','偕老','一生','一世','终生','终身','今世','来世','三生','三世','轮回','宿命','命运','注定','天意','天定',
+'佳偶','良人','佳人','才子','淑女','美女','帅哥','王子','公主','骑士','英雄','女神','男神','红颜','知己','蓝颜','陪伴','陪同','陪护','守护','呵护','照顾','关心','关怀','关爱','体贴','体谅','理解','包容','宽容','忍让','迁就','妥协','让步','支持','鼓励','安慰','依靠','依赖','信赖','信任','忠诚','专一','痴心','真心','诚心','用心','专心','恒心','决心',
+'勇气','勇敢','主动','被动','害羞','羞涩','腼腆','脸红','耳赤','加速','紧张','激动','兴奋','开心','快乐','幸福','美满','圆满','温馨','柔情','深情','痴情','真情','纯情','热情','激情','冲动','暧昧','朦胧','微妙','青涩','纯真','单纯','美好','美妙','美丽','可爱','迷人','动人','感人','动心','动情','生情','思念','想念','挂念','牵挂','惦记','惦念','怀念',
+'眷念','不舍','难舍','离别','分别','分离','失恋','心痛','流泪','哭泣','伤心','难过','痛苦','煎熬','折磨','遗憾','后悔','错过','失去','放手','放下','忘记','回忆','记忆','往事','曾经','过去','从前','旧爱','新欢','前任','旧情','旧梦','旧人','故人','等待','等候','期盼','期待','盼望','希望','愿望','梦想','幻想','憧憬','向往','寻觅','寻找','寻爱','求偶',
+'征婚','联谊','聚会','派对','舞会','烛光','晚餐','电影','逛街','散步','旅行','旅游','拍照','合影','礼物','鲜花','玫瑰','巧克力','戒指','项链','手链','卡片','短信','电话','微信','聊天','视频','语音','晚安','早安','问候','祝福','生日','纪念','周年','节日','情人节','七夕','圣诞','跨年','烟花','孔明灯','许愿','蜜月','婚纱照','结婚证','喜糖','喜酒','红包','伴娘',
+'伴郎','新郎','新娘','岳父','岳母','公公','婆婆','亲家','家庭','家人','孩子','生育','怀孕','婴儿','母子','父女','父子','母女','亲情','恩爱','和睦','和谐','相敬','如宾','举案','齐眉','到老','携手','并肩','同行','同甘','共苦','不离','不弃','天长','地久','海枯','石烂','永结','同心','心心','相印','两情','相悦','朝朝','暮暮','生生','世世','唯美','倾城',
+'玫瑰','红玫瑰','粉玫瑰','白玫瑰','蓝玫瑰','香槟玫瑰','郁金香','百合','满天星','勿忘我',
+'薰衣草','栀子花','茉莉','樱花','桃花','杏花','梨花','海棠','牡丹','山茶',
+'四叶草','幸运草','蒲公英','枫叶','银杏','红叶','柳枝','红豆','相思豆','紫藤',
+'连理枝','藤蔓','绿萝','多肉','仙人掌','月季','蔷薇','紫罗兰','鸢尾','雏菊',
+'花束','花瓣','花香','花雨','花海','花田','花环','花冠','花枝','花墙',
+'星空','银河','流星','流星雨','星座','北极星','月亮','满月','新月','月牙',
+'日出','日落','朝霞','晚霞','晨曦','黄昏','彩虹','极光','云海','星海',
+'海浪','沙滩','贝壳','海星','珍珠','珊瑚','海螺','潮汐','海风','灯塔',
+'小溪','河流','湖泊','海洋','瀑布','喷泉','温泉','岛屿','帆船','游艇',
+'春风','微风','晚风','细雨','雨滴','雨伞','雪花','雪人','霜花','雾凇',
+'戒指','项链','手链','脚链','耳环','胸针','发夹','发簪','梳子','镜子',
+'情书','信封','信纸','邮票','明信片','火漆','印章','丝带','蝴蝶结','礼盒',
+'千纸鹤','纸星星','幸运星','许愿瓶','漂流瓶','时间胶囊','同心锁','连心锁','祈福牌','许愿牌',
+'鲜花','巧克力','钱包','口红','化妆品','首饰','玩偶','公仔','音乐盒','拼图',
+'水晶球','沙漏','风铃','相册','照片','合影','拍立得','胶片','相框','照片墙',
+'蛋糕','马卡龙','提拉米苏','布丁','果冻','冰淇淋','圣代','奶昔','棉花糖','棒棒糖',
+'巧克力火锅','蜂蜜','糖霜','奶油','甜甜圈','泡芙','蛋挞','曲奇','饼干','糖果',
+'咖啡','拿铁','卡布奇诺','热可可','奶茶','红酒','香槟','气泡酒','鸡尾酒','果汁',
+'烛光晚餐','野餐','烧烤','火锅','寿司','意大利面','披萨','牛排','沙拉','慕斯',
+'草莓','樱桃','葡萄','苹果','柠檬','蜜桃','石榴','无花果','蓝莓','树莓',
+'沙发','地毯','壁炉','摇椅','吊篮','秋千','吊床','帐篷','阳台','天台',
+'窗帘','窗台','台灯','夜灯','香薰灯','蜡烛','烛台','灯罩','盆栽','花瓶',
+'情歌','歌词','旋律','音符','唱片','黑胶','磁带','CD','广播','电台',
+'钢琴','吉他','小提琴','大提琴','竖琴','笛子','口琴','萨克斯','古筝','琵琶',
+'电影','电影院','电影票','剧院','音乐厅','演唱会','音乐会','舞会','派对','酒吧',
+'书签','日记','笔记本','钢笔','墨水','铅笔','橡皮','尺子','彩笔','画本',
+'情诗','诗歌','小说','散文','童话','寓言','传说','神话','典故','对联',
+'相机','镜头','三脚架','自拍杆','快门','底片','胶卷','滤镜','光影','剪影',
+'旅行箱','背包','地图','指南针','机票','车票','船票','门票','护照','签证',
+'汽车','火车','飞机','轮船','单车','摩托','公交','出租','地铁','高铁',
+'公园','湖边','海边','湖畔','古镇','小巷','石桥','拱桥','廊桥','雨巷',
+'咖啡馆','茶馆','书店','图书馆','博物馆','美术馆','画廊','植物园','水族馆','天文馆',
+'埃菲尔铁塔','凯旋门','卢浮宫','大本钟','伦敦眼','自由女神','金门大桥','富士山','圣托里尼','爱琴海',
+'婚纱','礼服','西装','领结','领带','袖扣','头纱','婚戒','捧花','婚礼',
+'教堂','钟声','白鸽','气球','彩带','彩灯','灯串','霓虹','红毯','喜糖',
+'长裙','白衬衫','牛仔裤','帆布鞋','球鞋','高跟鞋','围巾','手套','帽子','墨镜',
+'手表','手镯','手帕','丝巾','披肩','腰带','荷包','香囊','绣球','红绳',
+'香水','香薰','精油','香膏','香皂','沐浴露','洗发水','浴盐','花瓣浴','牛奶浴',
+'天鹅','鸳鸯','蝴蝶','蜻蜓','萤火虫','海豚','企鹅','猫咪','狗狗','兔子',
+'小鹿','狐狸','熊猫','考拉','松鼠','刺猬','仓鼠','金鱼','锦鲤','海龟',
+'约会','告白','求婚','订婚','结婚','牵手','拥抱','亲吻','接吻','吻别',
+'逛街','散步','旅行','旅游','拍照','看星星','看电影','听音乐','跳舞','唱歌',
+'情人节','七夕','圣诞','跨年','生日','纪念日','周年','元宵','中秋','春节',
+'烟花','爆竹','仙女棒','冷烟花','荧光棒','孔明灯','河灯','花灯','灯笼','许愿池',
+'摩天轮','旋转木马','过山车','鬼屋','迷宫','镜子屋','万花筒','抓娃娃','盲盒','扭蛋',
+'塔罗','占卜','星盘','塔罗牌','幸运符','护身符','平安符','月老','红线','签文',
+'三生石','姻缘','宿命','轮回','三生三世','比翼鸟','牛郎织女','鹊桥','同心结','并蒂莲',
+'缘分','爱情','浪漫','甜蜜','温柔','温暖','幸福','美满','永恒','誓言',
+'月光','星光','灯光','烛光','火光','光晕','光环','光斑','倒影','投影',
+'泡泡','肥皂泡','风筝','纸飞机','热气球','风车','沙堡','许愿星','纸船','竹蜻蜓',
+'愚者','魔术师','女祭司','女皇','皇帝','教皇','恋人','战车','力量','隐士','命运之轮','正义','倒吊人','死神','节制','恶魔','高塔','星星','月亮','太阳','审判','世界',
+'权杖Ace','权杖二','权杖三','权杖四','权杖五','权杖六','权杖七','权杖八','权杖九','权杖十','权杖侍从','权杖骑士','权杖王后','权杖国王',
+'圣杯Ace','圣杯二','圣杯三','圣杯四','圣杯五','圣杯六','圣杯七','圣杯八','圣杯九','圣杯十','圣杯侍从','圣杯骑士','圣杯王后','圣杯国王',
+'宝剑Ace','宝剑二','宝剑三','宝剑四','宝剑五','宝剑六','宝剑七','宝剑八','宝剑九','宝剑十','宝剑侍从','宝剑骑士','宝剑王后','宝剑国王',
+'星币Ace','星币二','星币三','星币四','星币五','星币六','星币七','星币八','星币九','星币十','星币侍从','星币骑士','星币王后','星币国王',
+'米饭','面条','馒头','包子','饺子','馄饨','烧麦','汤圆','粽子','年糕',
+'炒饭','炒面','拌面','拉面','刀削面','炸酱面','热干面','阳春面','牛肉面','肥肠面',
+'米线','米粉','河粉','肠粉','凉皮','凉面','酿皮','粉丝','粉条','螺蛳粉',
+'火锅','麻辣烫','串串香','关东煮','烧烤','铁板烧','涮羊肉','烤鸭','烧鸡','白切鸡',
+'宫保鸡丁','鱼香肉丝','回锅肉','麻婆豆腐','水煮鱼','酸菜鱼','红烧肉','糖醋排骨','糖醋里脊','咕噜肉',
+'京酱肉丝','木须肉','蚂蚁上树','夫妻肺片','口水鸡','辣子鸡','大盘鸡','黄焖鸡','三杯鸡','盐焗鸡',
+'东坡肉','梅菜扣肉','粉蒸肉','红烧狮子头','四喜丸子','肉丸','鱼丸','虾丸','牛肉丸','猪肉丸',
+'小笼包','灌汤包','生煎包','叉烧包','奶黄包','豆沙包','花卷','烙饼','煎饼','手抓饼',
+'葱油饼','鸡蛋灌饼','肉夹馍','汉堡','三明治','热狗','披萨','意大利面','千层面','通心粉',
+'寿司','刺身','天妇罗','乌冬面','荞麦面','味噌汤','石锅拌饭','泡菜','部队锅','韩式炸鸡',
+'咖喱饭','蛋包饭','盖浇饭','煲仔饭','扬州炒饭','菠萝炒饭','石锅饭','卤肉饭','鸡肉饭','猪脚饭',
+'烧鹅','烧肉','叉烧','腊肉','腊肠','火腿','培根','香肠','午餐肉','肉松',
+'鸡蛋','鸭蛋','鹌鹑蛋','皮蛋','咸蛋','茶叶蛋','卤蛋','煎蛋','炒蛋','蒸蛋',
+'豆腐','豆干','豆皮','腐竹','油豆腐','臭豆腐','豆腐脑','豆浆','豆花','纳豆',
+'青菜','白菜','菠菜','生菜','油麦菜','空心菜','芹菜','韭菜','香菜','茼蒿',
+'萝卜','胡萝卜','土豆','红薯','紫薯','山药','芋头','莲藕','荸荠','菱角',
+'番茄','黄瓜','茄子','辣椒','青椒','彩椒','南瓜','冬瓜','丝瓜','苦瓜',
+'西兰花','花菜','卷心菜','紫甘蓝','芦笋','竹笋','莴笋','豆角','四季豆','豌豆',
+'蘑菇','香菇','金针菇','杏鲍菇','平菇','口蘑','木耳','银耳','海带','紫菜',
+'苹果','香蕉','橘子','橙子','葡萄','西瓜','桃子','梨子','草莓','樱桃',
+'菠萝','芒果','柠檬','柚子','石榴','猕猴桃','火龙果','百香果','荔枝','龙眼',
+'木瓜','哈密瓜','甜瓜','香瓜','柿子','山楂','枣子','无花果','蓝莓','树莓',
+'蛋糕','面包','饼干','曲奇','蛋挞','泡芙','布丁','果冻','冰淇淋','雪糕',
+'巧克力','糖果','棉花糖','棒棒糖','牛轧糖','太妃糖','软糖','口香糖','马卡龙','甜甜圈',
+'月饼','驴打滚','元宵','麻花','油条','春卷','锅贴','烧饼','酥饼','桃酥',
+'瓜子','花生','核桃','杏仁','腰果','开心果','榛子','松子','板栗','夏威夷果',
+'奶茶','咖啡','果汁','汽水','可乐','雪碧','酸奶','牛奶','椰奶','豆奶',
+'啤酒','红酒','白酒','黄酒','米酒','鸡尾酒','香槟','威士忌','伏特加','朗姆酒',
+'矿泉水','苏打水','气泡水','柠檬水','蜂蜜水','绿茶','红茶','乌龙茶','普洱茶','花茶',
+'沙拉','浓汤','罗宋汤','玉米汤','南瓜汤','紫菜蛋花汤','番茄蛋汤','冬瓜排骨汤','鸡汤','骨头汤'
+];
+
+function getDreamDayKey() {
+  var now = new Date();
+  var d = new Date(now.getTime());
+  if (now.getHours() < 5) d.setDate(d.getDate() - 1);
+  return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+}
+
+function initDreamRecallDone() {
+  if (!state.dreamRecallDone || typeof state.dreamRecallDone !== 'object') {
+    state.dreamRecallDone = {};
+  }
+}
+
+function hasRecalledToday(dreamId) {
+  initDreamRecallDone();
+  var key = getDreamDayKey();
+  if (!state.dreamRecallDone[key]) return false;
+  return state.dreamRecallDone[key].indexOf(dreamId) > -1;
+}
+
+function markDreamRecalled(dreamId) {
+  initDreamRecallDone();
+  var key = getDreamDayKey();
+  if (!state.dreamRecallDone[key]) state.dreamRecallDone[key] = [];
+  if (state.dreamRecallDone[key].indexOf(dreamId) === -1) {
+    state.dreamRecallDone[key].push(dreamId);
+  }
+  // 自动清理 7 天前的记录，避免数据无限膨胀
+  var allKeys = Object.keys(state.dreamRecallDone).sort();
+  if (allKeys.length > 7) {
+    allKeys.slice(0, allKeys.length - 7).forEach(function(k) {
+      delete state.dreamRecallDone[k];
+    });
+  }
+}
+
+window._drSelectedId = null;
+window._drStep = 'select';
+window._drResult = null;
+
+function renderDreamRecall() {
+  if (!state.dreamRecall || typeof state.dreamRecall !== 'object') state.dreamRecall = { records: [] };
+  if (!Array.isArray(state.dreamRecall.records)) state.dreamRecall.records = [];
+
+  var avatarsEl = document.getElementById('drAvatarList');
+  var mainEl = document.getElementById('drMain');
+  if (!avatarsEl || !mainEl) return;
+
+  if (!state.dreams || state.dreams.length === 0) {
+    avatarsEl.innerHTML = '<div style="color:#6a7a95;font-size:13px;padding:8px 4px;">还没有梦角</div>';
+    mainEl.innerHTML = '<div class="dr-hint">去梦角列表添加一个吧</div>';
+    return;
+  }
+
+  avatarsEl.innerHTML = state.dreams.map(function(d) {
+    var av = d.avatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2756%27 height=%2756%27 viewBox=%270 0 56 56%27%3E%3Ccircle cx=%2728%27 cy=%2728%27 r=%2728%27 fill=%27%231a2a45%27/%3E%3Ctext x=%2728%27 y=%2734%27 text-anchor=%27middle%27 fill=%27%237ec8e3%27 font-size=%2722%27%3E💜%3C/text%3E%3C/svg%3E';
+    var selected = window._drSelectedId === d.id ? ' selected' : '';
+    var done = hasRecalledToday(d.id) ? ' done' : '';
+    return '<div class="dr-avatar-item' + selected + done + '" onclick="pickDreamForRecall(\'' + d.id + '\')">' +
+      '<img class="dr-avatar-img" src="' + av + '">' +
+      '<span class="dr-avatar-name">' + d.name + '</span>' +
+      '<span class="dr-avatar-badge">' + (done ? '已回忆' : '') + '</span>' +
+      '</div>';
+  }).join('');
+
+  if (!window._drSelectedId) {
+    mainEl.innerHTML = '<div class="dr-hint">选择一位梦角<br><span style="font-size:12px;opacity:0.5;margin-top:8px;display:block;">每天早 5 点刷新，每位梦角每天可回忆一次</span></div>';
+    return;
+  }
+
+  var d = state.dreams.find(function(x) { return x.id === window._drSelectedId; });
+  if (!d) { window._drSelectedId = null; renderDreamRecall(); return; }
+
+  if (hasRecalledToday(d.id) && window._drStep === 'select') {
+    var rec = (state.dreamRecall && state.dreamRecall.records) ? state.dreamRecall.records.filter(function(r) {
+      return r.dreamId === d.id && r.dayKey === getDreamDayKey();
+    })[0] : null;
+
+    if (!rec) {
+      // 记录被删了，但今天已经回忆过 → 只显示"已完成"
+      mainEl.innerHTML = '<div class="dr-card">' +
+        '<div class="dr-card-title">今日回忆已完成</div>' +
+        '<div class="dr-card-sub" style="opacity:0.6;margin-top:12px;">今天的回忆记录已被删除</div>' +
+        '<div style="font-size:12px;color:#6a7a95;margin-top:16px;">明天早 5 点后可以再次回忆</div></div>';
+      return;
+    }
+
+    mainEl.innerHTML = '<div class="dr-card">' +
+      '<div class="dr-card-title">今日回忆已完成</div>' +
+      (rec.hasDream
+        ? '<div class="dr-card-sub">昨晚的线索</div><div class="dr-clue-row">' + (rec.clues || []).map(function(c) { return '<span class="dr-clue-tag">' + c + '</span>'; }).join('') + '</div>'
+        : '<div class="dr-card-sub" style="opacity:0.6;margin-top:12px;">昨晚没有入梦</div>') +
+      '<div style="font-size:12px;color:#6a7a95;margin-top:16px;">明天早 5 点后可以再次回忆</div></div>';
+    return;
+  }
+
+  if (window._drStep === 'ready') {
+    mainEl.innerHTML = '<div class="dr-card">' +
+      '<div class="dr-card-title">' + d.name + ' 的梦</div>' +
+      '<div class="dr-card-sub" style="margin-bottom:20px;">闭上眼睛，回忆昨晚</div>' +
+      '<button class="dr-btn-primary" onclick="startDreamRecall()">开始回忆</button></div>';
+    return;
+  }
+
+  if (window._drStep === 'result') {
+    var hasDream = window._drResult.hasDream;
+    mainEl.innerHTML = '<div class="dr-card">' +
+      '<div class="dr-card-title">' + d.name + '</div>' +
+      '<div class="dr-question">昨晚，你梦见我了吗？</div>' +
+      '<div class="dr-answer ' + (hasDream ? 'yes' : 'no') + '">' +
+      (hasDream ? '「我梦见你了。」' : '「昨晚...我没能梦见你。」') + '</div>' +
+      (hasDream
+        ? '<button class="dr-btn-primary" style="margin-top:24px;" onclick="getDreamClues()">点击获得梦境线索</button>'
+        : '<div class="dr-card-sub" style="margin-top:20px;opacity:0.55;font-size:12px;">今晚，我会努力梦到你</div>') +
+      '</div>';
+    return;
+  }
+
+  if (window._drStep === 'clues') {
+    mainEl.innerHTML = '<div class="dr-card">' +
+      '<div class="dr-card-title">' + d.name + ' 的梦之线索</div>' +
+      '<div class="dr-card-sub" style="margin-bottom:20px;">记住这五个词，它们藏着昨晚的梦</div>' +
+      '<div class="dr-clue-row dr-clue-row-big">' + window._drResult.clues.map(function(c) { return '<span class="dr-clue-tag dr-clue-tag-big">' + c + '</span>'; }).join('') + '</div>' +
+      '<div style="font-size:12px;color:#6a7a95;margin-top:24px;">今日回忆完成，明早 5 点后可再来</div></div>';
+    return;
+  }
+}
+
+function pickDreamForRecall(dreamId) {
+  window._drSelectedId = dreamId;
+  if (hasRecalledToday(dreamId)) {
+    window._drStep = 'select';
+  } else {
+    window._drStep = 'ready';
+    window._drResult = null;
+  }
+  renderDreamRecall();
+}
+
+function startDreamRecall() {
+  window._drResult = { hasDream: Math.random() < 0.5, clues: null };
+  window._drStep = 'result';
+
+  // 立刻写记录（不管有没有入梦），线索先留空
+  var d = state.dreams.find(function(x) { return x.id === window._drSelectedId; });
+  if (d) {
+    // 【核心修复】：标记这个梦角今天已回忆（与历史记录独立）
+    markDreamRecalled(d.id);
+
+    if (!state.dreamRecall) state.dreamRecall = { records: [] };
+    if (!Array.isArray(state.dreamRecall.records)) state.dreamRecall.records = [];
+    var record = {
+      id: 'dr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      dreamId: d.id, dreamName: d.name, dreamAvatar: d.avatar || '',
+      hasDream: window._drResult.hasDream, clues: [],
+      timestamp: Date.now(), dayKey: getDreamDayKey()
+    };
+    state.dreamRecall.records.push(record);
+    window._drCurrentRecordId = record.id;
+    saveState();
+  }
+
+  renderDreamRecall();
+}
+
+function getDreamClues() {
+  var pool = DREAM_CLUE_WORDS.slice();
+  var picked = [];
+  for (var i = 0; i < 5 && pool.length > 0; i++) {
+    picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  }
+  window._drResult.clues = picked;
+  window._drStep = 'clues';
+
+  // 把线索补充到刚才那条记录里
+  if (state.dreamRecall && state.dreamRecall.records && window._drCurrentRecordId) {
+    var rec = state.dreamRecall.records.find(function(r) { return r.id === window._drCurrentRecordId; });
+    if (rec) {
+      rec.clues = picked.slice();
+      saveState();
+    }
+  }
+  renderDreamRecall();
+}
+
+// ===== 梦境历史 =====
+window._drHistoryEdit = false;
+window._drHistorySelected = [];
+
+function openDreamHistory() {
+  window._drHistoryEdit = false;
+  window._drHistorySelected = [];
+  updateDrHistoryEditBtn();
+  renderDreamHistory();
+  navigateTo('pageDreamHistory');
+}
+
+function toggleDreamHistoryEdit() {
+  window._drHistoryEdit = !window._drHistoryEdit;
+  if (!window._drHistoryEdit) window._drHistorySelected = [];
+  updateDrHistoryEditBtn();
+  renderDreamHistory();
+}
+
+function exitDreamHistoryEdit() {
+  window._drHistoryEdit = false;
+  window._drHistorySelected = [];
+  updateDrHistoryEditBtn();
+  renderDreamHistory();
+}
+
+function updateDrHistoryEditBtn() {
+  var btn = document.getElementById('drHistoryEditBtn');
+  var bar = document.getElementById('drHistoryActionBar');
+  if (!btn) return;
+  if (window._drHistoryEdit) {
+    btn.textContent = '完成';
+    if (bar) bar.style.display = 'flex';
+  } else {
+    btn.textContent = '编辑';
+    if (bar) bar.style.display = 'none';
+  }
+}
+
+function renderDreamHistory() {
+  var listEl = document.getElementById('drHistoryList');
+  if (!listEl) return;
+  if (!state.dreamRecall || !state.dreamRecall.records || state.dreamRecall.records.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;color:#6a7a95;font-size:13px;padding:60px 20px;">还没有回忆记录</div>';
+    return;
+  }
+
+  var sorted = state.dreamRecall.records.slice().sort(function(a, b) { return b.timestamp - a.timestamp; });
+
+  listEl.innerHTML = sorted.map(function(r) {
+    var t = new Date(r.timestamp);
+    var timeStr = t.getFullYear() + '/' +
+      String(t.getMonth() + 1).padStart(2, '0') + '/' +
+      String(t.getDate()).padStart(2, '0') + ' ' +
+      String(t.getHours()).padStart(2, '0') + ':' +
+      String(t.getMinutes()).padStart(2, '0');
+
+    var av = r.dreamAvatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2740%27 height=%2740%27 viewBox=%270 0 40 40%27%3E%3Ccircle cx=%2720%27 cy=%2720%27 r=%2720%27 fill=%27%231a2a45%27/%3E%3Ctext x=%2720%27 y=%2725%27 text-anchor=%27middle%27 fill=%27%237ec8e3%27 font-size=%2716%27%3E💜%3C/text%3E%3C/svg%3E';
+    var selected = window._drHistorySelected.indexOf(r.id) > -1;
+
+    var cluesHtml = '';
+    if (r.hasDream && r.clues && r.clues.length > 0) {
+      cluesHtml = '<div class="dr-h-clues">' + r.clues.map(function(c) { return '<span class="dr-clue-tag" style="font-size:12px;">' + c + '</span>'; }).join('') + '</div>';
+    }
+
+    var click = window._drHistoryEdit ? 'toggleDrHistorySelect(\'' + r.id + '\')' : '';
+
+    return '<div class="dr-h-item' + (selected ? ' selected' : '') + '" onclick="' + click + '">' +
+      (window._drHistoryEdit ? '<div class="dr-h-check' + (selected ? ' checked' : '') + '">' + (selected ? '✓' : '') + '</div>' : '') +
+      '<img class="dr-h-avatar" src="' + av + '">' +
+      '<div class="dr-h-info">' +
+        '<div class="dr-h-name">' + r.dreamName + '</div>' +
+        '<div class="dr-h-time">' + timeStr + '</div>' +
+        '<div class="dr-h-status ' + (r.hasDream ? 'yes' : 'no') + '">' + (r.hasDream ? '✓ 有入梦' : '✗ 没有入梦') + '</div>' +
+        cluesHtml +
+      '</div></div>';
+  }).join('');
+}
+
+function toggleDrHistorySelect(id) {
+  var idx = window._drHistorySelected.indexOf(id);
+  if (idx > -1) window._drHistorySelected.splice(idx, 1);
+  else window._drHistorySelected.push(id);
+  renderDreamHistory();
+}
+
+function drHistorySelectAll() {
+  if (!state.dreamRecall || !state.dreamRecall.records) return;
+  if (window._drHistorySelected.length === state.dreamRecall.records.length) {
+    window._drHistorySelected = [];
+  } else {
+    window._drHistorySelected = state.dreamRecall.records.map(function(r) { return r.id; });
+  }
+  renderDreamHistory();
+}
+
+function drHistoryDeleteSelected() {
+  if (window._drHistorySelected.length === 0) { showToast('请先选择要删除的记录'); return; }
+  if (!confirm('确定删除选中的 ' + window._drHistorySelected.length + ' 条记录吗？')) return;
+  state.dreamRecall.records = state.dreamRecall.records.filter(function(r) {
+    return window._drHistorySelected.indexOf(r.id) === -1;
+  });
+  window._drHistorySelected = [];
+  saveState();
+  renderDreamHistory();
+  showToast('已删除');
+}
+
+// ===== 问卷系统 =====
+window._quizTab = 'dream';
+window._quizAddTab = 'single';
+window._quizCurrentPacketId = null;
+
+function initQuizData() {
+  if (!state.quizQuestions || !Array.isArray(state.quizQuestions)) state.quizQuestions = [];
+  if (!state.quizHistory || !Array.isArray(state.quizHistory)) state.quizHistory = [];
+}
+
+function switchQuizTab(tab) {
+  window._quizTab = tab;
+  var tabs = [
+    { id: 'quizTabDream', key: 'dream' },
+    { id: 'quizTabMe', key: 'me' },
+    { id: 'quizTabHistory', key: 'history' }
+  ];
+  tabs.forEach(function(t) {
+    var el = document.getElementById(t.id);
+    if (!el) return;
+    if (t.key === tab) {
+      el.style.color = 'var(--blue)';
+      el.style.borderBottom = '2px solid var(--blue)';
+    } else {
+      el.style.color = 'var(--gray)';
+      el.style.borderBottom = '2px solid transparent';
+    }
+  });
+  if (tab === 'dream') renderQuizDreamTab();
+  else if (tab === 'me') renderQuizMeTab();
+  else if (tab === 'history') renderQuizHistoryTab();
+}
+
+// ===== 梦角提问 Tab =====
+function renderQuizDreamTab() {
+  initQuizData();
+  var content = document.getElementById('quizTabContent');
+  if (!content) return;
+
+  var html = '<button class="quiz-add-btn" onclick="openQuizAddModal()">+ 添加问题</button>';
+  html += '<div style="padding:0 16px 80px;">';
+  html += '<div style="font-size:12px;color:var(--gray);margin-bottom:8px;">当前题库：' + state.quizQuestions.length + ' 条</div>';
+  if (state.quizQuestions.length === 0) {
+    html += '<div style="text-align:center;color:var(--gray);font-size:13px;padding:40px 20px;">还没有问题，点上方按钮添加吧</div>';
+  } else {
+    state.quizQuestions.forEach(function(q, i) {
+      html += '<div class="quiz-item">';
+      html += '<div class="quiz-item-text">' + escapeHtml(q) + '</div>';
+      html += '<span class="quiz-item-del" onclick="deleteQuizQuestion(' + i + ')">×</span>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+  content.innerHTML = html;
+}
+
+function deleteQuizQuestion(idx) {
+  if (!state.quizQuestions || idx < 0 || idx >= state.quizQuestions.length) return;
+  state.quizQuestions.splice(idx, 1);
+  saveState();
+  renderQuizDreamTab();
+  showToast('已删除');
+}
+
+// ===== 添加问题弹窗 =====
+function openQuizAddModal() {
+  window._quizAddTab = 'single';
+  var m = document.getElementById('quizAddModal');
+  if (!m) return;
+  document.getElementById('quizAddSingleInput').value = '';
+  document.getElementById('quizAddBatchInput').value = '';
+  switchQuizAddTab('single');
+  m.classList.add('show');
+  setTimeout(function() { document.getElementById('quizAddSingleInput').focus(); }, 100);
+}
+
+function closeQuizAddModal() {
+  var m = document.getElementById('quizAddModal');
+  if (m) m.classList.remove('show');
+}
+
+function switchQuizAddTab(tab) {
+  window._quizAddTab = tab;
+  var single = document.getElementById('quizAddTabSingle');
+  var batch = document.getElementById('quizAddTabBatch');
+  var singleInp = document.getElementById('quizAddSingleInput');
+  var batchInp = document.getElementById('quizAddBatchInput');
+  if (!single) return;
+  if (tab === 'single') {
+    single.style.background = '#007aff'; single.style.color = '#fff';
+    batch.style.background = '#f0f0f5'; batch.style.color = '#555';
+    singleInp.style.display = 'block';
+    batchInp.style.display = 'none';
+  } else {
+    batch.style.background = '#007aff'; batch.style.color = '#fff';
+    single.style.background = '#f0f0f5'; single.style.color = '#555';
+    singleInp.style.display = 'none';
+    batchInp.style.display = 'block';
+  }
+}
+
+function confirmQuizAdd() {
+  initQuizData();
+  if (window._quizAddTab === 'single') {
+    var v = (document.getElementById('quizAddSingleInput').value || '').trim();
+    if (!v) { showToast('请输入问题'); return; }
+    if (state.quizQuestions.indexOf(v) > -1) { showToast('问题已存在'); return; }
+    state.quizQuestions.push(v);
+    saveState();
+    closeQuizAddModal();
+    renderQuizDreamTab();
+    showToast('已添加');
+  } else {
+    var raw = document.getElementById('quizAddBatchInput').value || '';
+    var lines = raw.split('\n').map(function(s){ return s.trim(); }).filter(function(s){ return s; });
+    if (lines.length === 0) { showToast('请输入问题'); return; }
+    var added = 0, skipped = 0;
+    lines.forEach(function(l) {
+      if (state.quizQuestions.indexOf(l) > -1) { skipped++; return; }
+      state.quizQuestions.push(l);
+      added++;
+    });
+    saveState();
+    closeQuizAddModal();
+    renderQuizDreamTab();
+    if (skipped > 0) showToast('已添加 ' + added + ' 条，跳过 ' + skipped + ' 条重复');
+    else showToast('已添加 ' + added + ' 条');
+  }
+}
+
+// ===== 梦角主动发问卷（在 dreamReply 里调用） =====
+function maybeSendQuizQuestion(senderId) {
+  initQuizData();
+  if (state.quizQuestions.length === 0) return;
+  if (Math.random() > 0.05) return;
+
+  // 随机抽 1-5 个问题
+  var count = 1 + Math.floor(Math.random() * Math.min(5, state.quizQuestions.length));
+  var pool = state.quizQuestions.slice().sort(function() { return Math.random() - 0.5; });
+  var picked = pool.slice(0, count);
+
+  // 确定提问者
+  var askerId = senderId;
+  var askerName = '梦角';
+  if (!askerId && state.currentChatId && !state.currentChatId.startsWith('group_')) {
+    askerId = state.currentChatId;
+  }
+  if (askerId) {
+    var d = state.dreams.find(function(x) { return x.id === askerId; });
+    if (d) askerName = d.name;
+  }
+
+  var packetId = 'qz_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  var packet = {
+    from: 'dream',
+    type: 'quiz',
+    packetId: packetId,
+    askerId: askerId || 'dream',
+    askerName: askerName,
+    answererId: 'user',
+    questions: picked.slice(),
+    answers: null,
+    read: false,
+    time: Date.now()
+  };
+
+  chatMessages.push(packet);
+  renderChatMessages();
+  saveChatMessages();
+}
+
+// ===== 打开作答弹窗 =====
+function openQuizAnswerModal(packetId) {
+  var packet = findQuizPacket(packetId);
+  if (!packet) return;
+  // 如果是「我提问」的问卷 → 直接打开查看
+  if (packet.isMeAsk) {
+    openQuizViewModal(packetId);
+    return;
+  }
+  if (packet.answers && packet.answers.length > 0) {
+    // 已作答 → 打开查看
+    openQuizViewModal(packetId);
+    return;
+  }
+  if (packet.answererId !== 'user') return;
+
+  window._quizCurrentPacketId = packetId;
+  var body = document.getElementById('quizAnswerBody');
+  var html = '';
+  packet.questions.forEach(function(q, i) {
+    html += '<div class="quiz-q-block">';
+    html += '<div class="quiz-q-title">Q' + (i + 1) + '. ' + escapeHtml(q) + '</div>';
+    html += '<textarea class="quiz-ans-input" id="quizAns_' + i + '" placeholder="写下你的回答"></textarea>';
+    html += '</div>';
+  });
+  body.innerHTML = html;
+  document.getElementById('quizAnswerModal').classList.add('show');
+}
+
+function closeQuizAnswerModal() {
+  document.getElementById('quizAnswerModal').classList.remove('show');
+  window._quizCurrentPacketId = null;
+}
+
+function submitQuizAnswer() {
+  var packetId = window._quizCurrentPacketId;
+  if (!packetId) return;
+  var packet = findQuizPacket(packetId);
+  if (!packet) return;
+
+  var answers = [];
+  for (var i = 0; i < packet.questions.length; i++) {
+    var el = document.getElementById('quizAns_' + i);
+    answers.push(((el && el.value) || '').trim());
+  }
+  packet.answers = answers;
+
+  // 找到聊天里这条消息的索引，替换答案
+  var idx = chatMessages.indexOf(packet);
+  if (idx > -1) {
+    chatMessages[idx] = packet;
+  }
+  saveChatMessages();
+
+  closeQuizAnswerModal();
+  renderChatMessages();
+
+  // 自动保存到历史记录
+  saveQuizHistory(packet);
+
+  // 延迟模拟梦角阅读
+  var delay = 3000 + Math.random() * 5000;
+  setTimeout(function() {
+    if (state.currentChatId && state.chatSessions[state.currentChatId]) {
+      var readMsg = { from: 'system', text: '「' + packet.askerName + '」已阅读问卷', time: Date.now() };
+      state.chatSessions[state.currentChatId].push(readMsg);
+      saveState();
+      if (chatMessages.length > 0 || true) {
+        loadChatMessages();
+        renderChatMessages();
+      }
+    }
+  }, delay);
+}
+
+function saveQuizHistory(packet) {
+  initQuizData();
+  state.quizHistory.push({
+    id: packet.packetId,
+    type: 'dream_ask',
+    askerId: packet.askerId,
+    askerName: packet.askerName,
+    answererId: packet.answererId,
+    answererName: state.profile.name || '我',
+    questions: packet.questions.slice(),
+    answers: packet.answers ? packet.answers.slice() : [],
+    time: Date.now()
+  });
+  saveState();
+}
+
+function findQuizPacket(packetId) {
+  // 先在当前 chatMessages 里找
+  for (var i = 0; i < chatMessages.length; i++) {
+    if (chatMessages[i] && chatMessages[i].type === 'quiz' && chatMessages[i].packetId === packetId) {
+      return chatMessages[i];
+    }
+  }
+  // 再从所有 chatSessions 里找
+  for (var cid in state.chatSessions) {
+    var msgs = state.chatSessions[cid];
+    if (!Array.isArray(msgs)) continue;
+    for (var j = 0; j < msgs.length; j++) {
+      if (msgs[j] && msgs[j].type === 'quiz' && msgs[j].packetId === packetId) {
+        return msgs[j];
+      }
+    }
+  }
+  return null;
+}
+
+// ===== 查看已答问卷 =====
+function openQuizViewModal(packetId) {
+  var packet = findQuizPacket(packetId);
+  if (!packet) return;
+  var body = document.getElementById('quizViewBody');
+  var html = '';
+  packet.questions.forEach(function(q, i) {
+    var qText = '';
+    var qOptions = null;
+    if (typeof q === 'string') {
+      qText = q;
+    } else if (q && typeof q === 'object') {
+      qText = q.question || '';
+      qOptions = q.options || null;
+    }
+    html += '<div class="quiz-q-block">';
+    html += '<div class="quiz-q-title">Q' + (i + 1) + '. ' + escapeHtml(qText) + '</div>';
+    if (qOptions && qOptions.length > 0) {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">';
+      qOptions.forEach(function(opt) {
+        html += '<span style="font-size:12px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#555;">' + escapeHtml(opt) + '</span>';
+      });
+      html += '</div>';
+    }
+    var ansVal = (packet.answers && packet.answers[i]) ? packet.answers[i] : '';
+    if (ansVal) {
+      html += '<div style="padding:10px 12px;background:#f8f8fa;border-radius:10px;font-size:13px;color:#1d1d1f;line-height:1.5;">' + escapeHtml(ansVal) + '</div>';
+    } else {
+      html += '<div style="padding:10px 12px;background:#f8f8fa;border-radius:10px;font-size:13px;color:#bbb;">未作答</div>';
+    }
+    html += '</div>';
+  });
+  body.innerHTML = html;
+  document.getElementById('quizViewModal').classList.add('show');
+}
+
+function closeQuizViewModal() {
+  document.getElementById('quizViewModal').classList.remove('show');
+}
+
+// ===== 历史记录 Tab =====
+window._quizHistoryEdit = false;
+window._quizHistorySelected = [];
+
+function renderQuizHistoryTab() {
+  initQuizData();
+  var content = document.getElementById('quizTabContent');
+  if (!content) return;
+
+  var sorted = state.quizHistory.slice().sort(function(a, b) { return b.time - a.time; });
+
+  var html = '';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px 8px;">';
+  html += '<span style="font-size:13px;color:var(--gray);">共 ' + sorted.length + ' 条</span>';
+  html += '<button onclick="toggleQuizHistoryEdit()" style="padding:6px 14px;border:1px solid var(--border);background:var(--card);border-radius:14px;font-size:13px;cursor:pointer;color:' + (window._quizHistoryEdit ? 'var(--red)' : 'var(--blue)') + ';">' + (window._quizHistoryEdit ? '完成' : '编辑') + '</button>';
+  html += '</div>';
+
+  if (sorted.length === 0) {
+    html += '<div style="padding:60px 20px;text-align:center;color:var(--gray);font-size:13px;">还没有问卷记录</div>';
+    content.innerHTML = html;
+    return;
+  }
+
+  html += '<div style="padding:0 0 80px;">';
+  sorted.forEach(function(h) {
+    var t = new Date(h.time);
+    var timeStr = t.getFullYear() + '/' +
+      String(t.getMonth() + 1).padStart(2, '0') + '/' +
+      String(t.getDate()).padStart(2, '0') + ' ' +
+      String(t.getHours()).padStart(2, '0') + ':' +
+      String(t.getMinutes()).padStart(2, '0');
+
+    var selected = window._quizHistorySelected.indexOf(h.id) > -1;
+    var whoLine = '';
+    if (h.type === 'dream_ask') {
+      whoLine = h.askerName + ' 提问 · ' + h.answererName + ' 回答';
+    } else {
+      whoLine = h.askerName + ' 提问 · ' + h.answererName + ' 回答';
+    }
+    var preview = '';
+    if (h.questions && h.questions.length > 0) {
+      var q0 = h.questions[0];
+      if (typeof q0 === 'string') preview = q0;
+      else if (q0 && q0.question) preview = q0.question;
+      if (h.questions.length > 1) preview += ' …（共 ' + h.questions.length + ' 题）';
+    }
+
+    var click = window._quizHistoryEdit
+      ? 'toggleQuizHistorySelect(\'' + h.id + '\')'
+      : 'openQuizHistoryDetail(\'' + h.id + '\')';
+
+    html += '<div class="quiz-history-item' + (selected ? ' selected' : '') + '" onclick="' + click + '" style="' + (selected ? 'background:rgba(0,122,255,0.06);' : '') + '">';
+    if (window._quizHistoryEdit) {
+      html += '<div class="quiz-history-check' + (selected ? ' checked' : '') + '">' + (selected ? '✓' : '') + '</div>';
+    }
+    html += '<div class="quiz-history-info">';
+    html += '<div class="quiz-history-title">' + escapeHtml(whoLine) + '</div>';
+    html += '<div class="quiz-history-time">' + timeStr + '</div>';
+    html += '<div class="quiz-history-preview">' + escapeHtml(preview) + '</div>';
+    html += '</div></div>';
+  });
+  html += '</div>';
+
+    // 底部编辑操作栏
+  var _barShow = window._quizHistoryEdit ? 'display:flex;' : 'display:none;';
+  html += '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(255,255,255,0.96);border-top:1px solid #e5e5ea;padding:14px 16px 24px;box-sizing:border-box;gap:12px;z-index:30;' + _barShow + '">';
+  html += '<button onclick="quizHistorySelectAll()" style="flex:1;padding:16px 10px;border-radius:14px;font-size:16px;font-weight:600;border:1px solid #e5e5ea;background:#fff;color:#1d1d1f;cursor:pointer;font-family:inherit;">全选</button>';
+  html += '<button onclick="quizHistoryDeleteSelected()" style="flex:1;padding:16px 10px;border-radius:14px;font-size:16px;font-weight:600;border:none;background:rgba(255,59,48,0.9);color:#fff;cursor:pointer;font-family:inherit;">删除</button>';
+  html += '<button onclick="exitQuizHistoryEdit()" style="flex:1;padding:16px 10px;border-radius:14px;font-size:16px;font-weight:600;border:1px solid #e5e5ea;background:#fff;color:#1d1d1f;cursor:pointer;font-family:inherit;">取消</button>';
+  html += '</div>';
+
+  content.innerHTML = html;
+}
+
+function toggleQuizHistoryEdit() {
+  window._quizHistoryEdit = !window._quizHistoryEdit;
+  if (!window._quizHistoryEdit) window._quizHistorySelected = [];
+  renderQuizHistoryTab();
+}
+
+function exitQuizHistoryEdit() {
+  window._quizHistoryEdit = false;
+  window._quizHistorySelected = [];
+  renderQuizHistoryTab();
+}
+
+function toggleQuizHistorySelect(id) {
+  var idx = window._quizHistorySelected.indexOf(id);
+  if (idx > -1) window._quizHistorySelected.splice(idx, 1);
+  else window._quizHistorySelected.push(id);
+  renderQuizHistoryTab();
+}
+
+function quizHistorySelectAll() {
+  initQuizData();
+  if (window._quizHistorySelected.length === state.quizHistory.length) {
+    window._quizHistorySelected = [];
+  } else {
+    window._quizHistorySelected = state.quizHistory.map(function(h) { return h.id; });
+  }
+  renderQuizHistoryTab();
+}
+
+function quizHistoryDeleteSelected() {
+  if (window._quizHistorySelected.length === 0) {
+    showToast('请先选择记录');
+    return;
+  }
+  if (!confirm('确定删除选中的 ' + window._quizHistorySelected.length + ' 条记录吗？')) return;
+  state.quizHistory = state.quizHistory.filter(function(h) {
+    return window._quizHistorySelected.indexOf(h.id) === -1;
+  });
+  window._quizHistorySelected = [];
+  window._quizHistoryEdit = false;
+  saveState();
+  renderQuizHistoryTab();
+  showToast('已删除');
+}
+
+// ===== 历史详情页 =====
+function openQuizHistoryDetail(historyId) {
+  initQuizData();
+  var h = state.quizHistory.find(function(x) { return x.id === historyId; });
+  if (!h) return;
+
+  var body = document.getElementById('quizHistoryDetailBody');
+  var t = new Date(h.time);
+  var timeStr = t.getFullYear() + '年' +
+    (t.getMonth() + 1) + '月' + t.getDate() + '日 ' +
+    String(t.getHours()).padStart(2, '0') + ':' +
+    String(t.getMinutes()).padStart(2, '0');
+
+  var html = '';
+  html += '<div style="padding:14px 16px;background:var(--card);border-radius:12px;margin-bottom:14px;">';
+  html += '<div style="font-size:13px;color:var(--gray);margin-bottom:6px;">提问：' + escapeHtml(h.askerName) + '</div>';
+  html += '<div style="font-size:13px;color:var(--gray);margin-bottom:6px;">回答：' + escapeHtml(h.answererName) + '</div>';
+  html += '<div style="font-size:12px;color:#bbb;">' + timeStr + '</div>';
+  html += '</div>';
+
+  h.questions.forEach(function(q, i) {
+    var qText = '';
+    var qOptions = null;
+    if (typeof q === 'string') {
+      qText = q;
+    } else if (q && typeof q === 'object') {
+      qText = q.question || '';
+      qOptions = q.options || null;
+    }
+    html += '<div class="quiz-q-block" style="background:var(--card);border-radius:12px;padding:14px 16px;">';
+    html += '<div class="quiz-q-title">Q' + (i + 1) + '. ' + escapeHtml(qText) + '</div>';
+    if (qOptions && qOptions.length > 0) {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">';
+      qOptions.forEach(function(opt) {
+        html += '<span style="font-size:12px;padding:3px 10px;border-radius:10px;background:#f0f0f5;color:#555;">' + escapeHtml(opt) + '</span>';
+      });
+      html += '</div>';
+    }
+    var ansVal = (h.answers && h.answers[i]) ? h.answers[i] : '';
+    if (ansVal) {
+      html += '<div style="padding:10px 12px;background:#f8f8fa;border-radius:10px;font-size:13px;color:#1d1d1f;line-height:1.5;">' + escapeHtml(ansVal) + '</div>';
+    } else {
+      html += '<div style="padding:10px 12px;background:#f8f8fa;border-radius:10px;font-size:13px;color:#bbb;">未作答</div>';
+    }
+    html += '</div>';
+  });
+
+  body.innerHTML = html;
+  navigateTo('pageQuizHistoryDetail');
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ===== 我提问 Tab =====
+window._quizMeType = 'single';
+window._quizMeSelected = [];
+window._quizMeEditMode = false;
+window._quizMePressTimer = null;
+
+function initQuizMeData() {
+  if (!state.quizMeQuestions || !Array.isArray(state.quizMeQuestions)) state.quizMeQuestions = [];
+}
+
+function renderQuizMeTab() {
+  initQuizMeData();
+  var content = document.getElementById('quizTabContent');
+  if (!content) return;
+
+  var html = '';
+  html += '<button class="quiz-add-btn" onclick="openQuizMeAddModal()">+ 添加题目</button>';
+  html += '<div style="padding:0 16px 80px;">';
+  html += '<div style="font-size:12px;color:var(--gray);margin-bottom:8px;">当前题库：' + state.quizMeQuestions.length + ' 条（长按题目 3 秒可多选发送）</div>';
+  if (state.quizMeQuestions.length === 0) {
+    html += '<div style="text-align:center;color:var(--gray);font-size:13px;padding:40px 20px;">还没有题目，点上方按钮添加吧</div>';
+  } else {
+    state.quizMeQuestions.forEach(function(q, i) {
+      var selected = window._quizMeSelected.indexOf(i) > -1;
+      html += '<div class="quiz-item' + (selected ? ' selected' : '') + '" data-quiz-me-idx="' + i + '" style="' + (selected ? 'background:rgba(0,122,255,0.08);border-color:var(--blue);' : '') + '">';
+      html += '<div class="quiz-item-text">';
+      html += '<div style="font-size:13px;color:var(--gray);margin-bottom:4px;">' + (q.type === 'multi' ? '【多选】' : '【单选】') + '</div>';
+      html += escapeHtml(q.question);
+      html += '<div style="font-size:12px;color:#86868b;margin-top:6px;">选项：' + q.options.map(function(o){ return escapeHtml(o); }).join(' / ') + '</div>';
+      html += '</div>';
+      html += '<span class="quiz-item-del" onclick="event.stopPropagation();deleteQuizMeQuestion(' + i + ')">×</span>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+
+  // 底部操作栏（多选模式）
+  html += '<div id="quizMeBar" class="quiz-bar' + (window._quizMeSelected.length > 0 ? ' show' : '') + '">';
+  html += '<button class="btn-cancel" onclick="exitQuizMeSelect()">取消</button>';
+  html += '<button class="btn-del" onclick="confirmQuizMeSend()" style="background:rgba(0,122,255,0.85);">发送（' + window._quizMeSelected.length + '）</button>';
+  html += '</div>';
+
+  content.innerHTML = html;
+
+  // 绑定长按
+  setTimeout(bindQuizMeLongPress, 50);
+}
+
+function bindQuizMeLongPress() {
+  var items = document.querySelectorAll('[data-quiz-me-idx]');
+  items.forEach(function(el) {
+    var idx = parseInt(el.dataset.quizMeIdx);
+
+    function start(e) {
+      clearTimeout(window._quizMePressTimer);
+      window._quizMePressTimer = setTimeout(function() {
+        var pos = window._quizMeSelected.indexOf(idx);
+        if (pos === -1) window._quizMeSelected.push(idx);
+        else window._quizMeSelected.splice(pos, 1);
+        if (navigator.vibrate) navigator.vibrate(30);
+        renderQuizMeTab();
+      }, 800);
+    }
+    function cancel() { clearTimeout(window._quizMePressTimer); }
+
+    el.addEventListener('touchstart', start, { passive: true });
+    el.addEventListener('touchend', cancel);
+    el.addEventListener('touchmove', cancel);
+    el.addEventListener('touchcancel', cancel);
+    el.addEventListener('mousedown', start);
+    el.addEventListener('mouseup', cancel);
+    el.addEventListener('mouseleave', cancel);
+  });
+}
+
+function deleteQuizMeQuestion(idx) {
+  if (!state.quizMeQuestions || idx < 0 || idx >= state.quizMeQuestions.length) return;
+  state.quizMeQuestions.splice(idx, 1);
+  window._quizMeSelected = [];
+  saveState();
+  renderQuizMeTab();
+  showToast('已删除');
+}
+
+function exitQuizMeSelect() {
+  window._quizMeSelected = [];
+  renderQuizMeTab();
+}
+
+function confirmQuizMeSend() {
+  if (window._quizMeSelected.length === 0) { showToast('请先长按选择题库'); return; }
+  openQuizSendModal();
+}
+
+// ===== 添加题目弹窗 =====
+function openQuizMeAddModal() {
+  window._quizMeType = 'single';
+  document.getElementById('quizMeQInput').value = '';
+  document.getElementById('quizMeOptionsContainer').innerHTML = '';
+  addQuizMeOption();
+  addQuizMeOption();
+  switchQuizMeType('single');
+  document.getElementById('quizMeAddModal').classList.add('show');
+}
+
+function closeQuizMeAddModal() {
+  document.getElementById('quizMeAddModal').classList.remove('show');
+}
+
+function switchQuizMeType(type) {
+  window._quizMeType = type;
+  var single = document.getElementById('quizMeTypeSingle');
+  var multi = document.getElementById('quizMeTypeMulti');
+  if (!single) return;
+  if (type === 'single') {
+    single.style.background = '#007aff'; single.style.color = '#fff';
+    multi.style.background = '#f0f0f5'; multi.style.color = '#555';
+  } else {
+    multi.style.background = '#007aff'; multi.style.color = '#fff';
+    single.style.background = '#f0f0f5'; single.style.color = '#555';
+  }
+}
+
+function addQuizMeOption() {
+  var container = document.getElementById('quizMeOptionsContainer');
+  var count = container.querySelectorAll('.quiz-opt-row').length;
+  if (count >= 10) { showToast('最多 10 个选项'); return; }
+  var row = document.createElement('div');
+  row.className = 'quiz-opt-row';
+  row.innerHTML = '<input type="text" placeholder="选项 ' + (count + 1) + '"><span class="quiz-opt-del">×</span>';
+  container.appendChild(row);
+  row.querySelector('.quiz-opt-del').onclick = function() {
+    if (container.querySelectorAll('.quiz-opt-row').length <= 2) {
+      showToast('至少保留 2 个选项'); return;
+    }
+    row.remove();
+  };
+}
+
+function confirmQuizMeAdd() {
+  var q = (document.getElementById('quizMeQInput').value || '').trim();
+  if (!q) { showToast('请输入题目'); return; }
+  var rows = document.querySelectorAll('#quizMeOptionsContainer .quiz-opt-row');
+  var options = [];
+  rows.forEach(function(r) {
+    var v = (r.querySelector('input').value || '').trim();
+    if (v) options.push(v);
+  });
+  if (options.length < 2) { showToast('至少 2 个选项'); return; }
+
+  initQuizMeData();
+  state.quizMeQuestions.push({
+    id: 'qm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    question: q,
+    type: window._quizMeType,
+    options: options
+  });
+  saveState();
+  closeQuizMeAddModal();
+  renderQuizMeTab();
+  showToast('已保存');
+}
+
+// ===== 发送给梦角 =====
+function openQuizSendModal() {
+  var body = document.getElementById('quizSendBody');
+  var html = '';
+  if (!state.dreams || state.dreams.length === 0) {
+    html = '<div style="padding:20px;text-align:center;color:#999;">还没有梦角</div>';
+  } else {
+    state.dreams.forEach(function(d) {
+      var av = d.avatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2740%27 height=%2740%27 viewBox=%270 0 40 40%27%3E%3Ccircle cx=%2720%27 cy=%2720%27 r=%2720%27 fill=%27%23ffe0e8%27/%3E%3Ctext x=%2720%27 y=%2725%27 text-anchor=%27middle%27 fill=%27%23d6336c%27 font-size=%2716%27%3E💜%3C/text%3E%3C/svg%3E';
+      html += '<div onclick="sendQuizMeTo(\'' + d.id + '\')" style="display:flex;align-items:center;padding:12px;border-radius:12px;background:#f8f8fa;margin-bottom:8px;cursor:pointer;">';
+      html += '<img src="' + av + '" style="width:40px;height:40px;border-radius:50%;object-fit:cover;margin-right:12px;">';
+      html += '<span style="font-size:15px;color:#1d1d1f;">' + d.name + '</span>';
+      html += '</div>';
+    });
+  }
+  body.innerHTML = html;
+  document.getElementById('quizSendModal').classList.add('show');
+}
+
+function closeQuizSendModal() {
+  document.getElementById('quizSendModal').classList.remove('show');
+}
+
+function sendQuizMeTo(dreamId) {
+  if (window._quizMeSelected.length === 0) { closeQuizSendModal(); return; }
+  var dream = state.dreams.find(function(x) { return x.id === dreamId; });
+  if (!dream) return;
+
+  // 收集选中的题目
+  var picked = window._quizMeSelected.slice().sort(function(a,b){return a-b;}).map(function(i) {
+    var q = state.quizMeQuestions[i];
+    return { id: q.id, question: q.question, type: q.type, options: q.options.slice() };
+  });
+
+  // 切换到和这个梦角的聊天
+  saveChatMessages();
+  if (!state.chatSessions[dreamId]) state.chatSessions[dreamId] = [];
+  state.currentChatId = dreamId;
+
+  var packetId = 'qzm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  var packet = {
+    from: 'user',
+    type: 'quiz',
+    packetId: packetId,
+    askerId: 'user',
+    askerName: state.profile.name || '我',
+    answererId: dreamId,
+    questions: picked,
+    answers: null,
+    read: false,
+    time: Date.now(),
+    isMeAsk: true
+  };
+  state.chatSessions[dreamId].push(packet);
+  saveState();
+
+  window._quizMeSelected = [];
+  closeQuizSendModal();
+  loadChatMessages();
+  renderChat();
+  navigateTo('pagePrivateChat');
+  showToast('已发送给「' + dream.name + '」');
+
+  // 梦角决定
+  setTimeout(function() {
+    var roll = Math.random();
+    if (roll < 0.9) {
+      // 回答 → 30-300 秒
+      var delay = 30000 + Math.random() * 270000;
+      setTimeout(function() { quizMeDreamAnswer(packetId, dreamId); }, delay);
+    } else {
+      // 拒绝
+      setTimeout(function() {
+        if (!state.chatSessions[dreamId]) return;
+        state.chatSessions[dreamId].push({ from: 'system', text: '「' + dream.name + '」拒绝了回答问题', time: Date.now() });
+        saveState();
+        if (state.currentChatId === dreamId) {
+          loadChatMessages();
+          renderChatMessages();
+        }
+      }, 5000 + Math.random() * 5000);
+    }
+  }, 1000);
+}
+
+function quizMeDreamAnswer(packetId, dreamId) {
+  var msgs = state.chatSessions[dreamId] || [];
+  var packet = null;
+  for (var i = 0; i < msgs.length; i++) {
+    if (msgs[i] && msgs[i].type === 'quiz' && msgs[i].packetId === packetId) {
+      packet = msgs[i]; break;
+    }
+  }
+  if (!packet) return;
+  if (packet.answers && packet.answers.length > 0) return;
+
+  var dream = state.dreams.find(function(x) { return x.id === dreamId; });
+  var dreamName = dream ? dream.name : '梦角';
+
+  // 生成答案
+  var answers = packet.questions.map(function(q) {
+    if (q.type === 'single') {
+      return q.options[Math.floor(Math.random() * q.options.length)];
+    } else {
+      // 多选：随机 1 到 N 个
+      var n = 1 + Math.floor(Math.random() * q.options.length);
+      var pool = q.options.slice().sort(function() { return Math.random() - 0.5; });
+      return pool.slice(0, n).join('、');
+    }
+  });
+  packet.answers = answers;
+  packet.answererName = dreamName;
+  packet.answererId = dreamId;
+  saveState();
+
+  // 在聊天里加一条系统小字
+  if (!state.chatSessions[dreamId]) state.chatSessions[dreamId] = [];
+  state.chatSessions[dreamId].push({
+    from: 'system',
+    text: '「' + dreamName + '」已回答问卷',
+    time: Date.now()
+  });
+  saveState();
+
+  if (state.currentChatId === dreamId) {
+    loadChatMessages();
+    renderChatMessages();
+  }
+
+  sendNotification(dreamName, '已回答你的问卷');
+
+  // 存历史
+  initQuizData();
+  state.quizHistory.push({
+    id: packetId,
+    type: 'me_ask',
+    askerId: 'user',
+    askerName: state.profile.name || '我',
+    answererId: dreamId,
+    answererName: dreamName,
+    questions: packet.questions.slice(),
+    answers: answers.slice(),
+    time: Date.now()
+  });
+  saveState();
+}
+
+// ===== 我提问：查看已答问卷 =====
+function openQuizMeViewModal(packetId) {
+  openQuizViewModal(packetId);
+}
+
+// ===== 备忘录系统 =====
+window._memoEditId = null;
+window._memoSelectedDreams = [];
+
+function initMemoData() {
+  if (!state.memos || !Array.isArray(state.memos)) state.memos = [];
+}
+
+function renderMemoList() {
+  initMemoData();
+  var container = document.getElementById('memoListContainer');
+  if (!container) return;
+
+  if (state.memos.length === 0) {
+    container.innerHTML = '<div class="memo-empty">还没有备忘录<br>点右上角 + 新建一条吧</div>';
+    return;
+  }
+
+  var sorted = state.memos.slice().sort(function(a, b) {
+    // 有提醒的排前面（按时间），无提醒的排后面
+    if (a.remindEnabled && !b.remindEnabled) return -1;
+    if (!a.remindEnabled && b.remindEnabled) return 1;
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  });
+
+  var html = '';
+  sorted.forEach(function(m) {
+    var status = 'pending';
+    var statusText = '未完成';
+    var statusClass = 'pending';
+
+    if (!m.remindEnabled) {
+      statusText = '无需提醒';
+      statusClass = 'none';
+    } else if (m.status === 'done') {
+      statusText = '已完成';
+      statusClass = 'done';
+    }
+
+    var remindLine = '';
+    if (m.remindEnabled && m.remindDate && m.remindTime) {
+      remindLine = '⏰ ' + m.remindDate + ' ' + m.remindTime;
+    }
+
+    var preview = (m.content || '').replace(/\n/g, ' ');
+    if (preview.length > 50) preview = preview.slice(0, 50) + '…';
+
+    html += '<div class="memo-item" onclick="openMemoEdit(\'' + m.id + '\')">';
+    html += '<div class="memo-item-content">' + escapeHtml(preview) + '</div>';
+    if (remindLine) html += '<div class="memo-item-remind">' + remindLine + '</div>';
+    html += '<div class="memo-item-foot" style="justify-content:space-between;">';
+    html += '<span class="memo-status-tag ' + statusClass + '">' + statusText + '</span>';
+    html += '<span onclick="event.stopPropagation();deleteMemo(\'' + m.id + '\')" style="font-size:12px;color:var(--red);cursor:pointer;padding:4px 10px;border-radius:8px;background:rgba(255,59,48,0.1);user-select:none;">删除</span>';
+    html += '</div>';
+    html += '</div>';
+  });
+
+  container.innerHTML = html;
+}
+
+function deleteMemo(memoId) {
+  if (!confirm('确定删除这条备忘录吗？此操作不可恢复！')) return;
+  initMemoData();
+  state.memos = state.memos.filter(function(m) { return m.id !== memoId; });
+  saveState();
+  renderMemoList();
+  showToast('已删除');
+}
+
+function openMemoEdit(memoId) {
+  initMemoData();
+  window._memoEditId = memoId;
+
+  var memo = memoId ? state.memos.find(function(x) { return x.id === memoId; }) : null;
+
+  document.getElementById('memoEditTitle').textContent = memo ? '编辑备忘录' : '新建备忘录';
+  document.getElementById('memoContentInput').value = memo ? (memo.content || '') : '';
+
+  var toggle = document.getElementById('memoRemindToggle');
+  var settingArea = document.getElementById('memoRemindSetting');
+  var remindOn = memo ? !!memo.remindEnabled : false;
+  toggle.classList.toggle('on', remindOn);
+  settingArea.style.display = remindOn ? 'block' : 'none';
+  toggle.onclick = function() {
+    var isOn = toggle.classList.toggle('on');
+    settingArea.style.display = isOn ? 'block' : 'none';
+  };
+
+  // 日期和时间
+  var dateInput = document.getElementById('memoDateInput');
+  var timeInput = document.getElementById('memoTimeInput');
+  if (memo && memo.remindDate) dateInput.value = memo.remindDate;
+  else {
+    var now = new Date();
+    dateInput.value = now.getFullYear() + '-' +
+      String(now.getMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getDate()).padStart(2, '0');
+  }
+  if (memo && memo.remindTime) timeInput.value = memo.remindTime;
+  else {
+    var now2 = new Date();
+    var hh = String(now2.getHours()).padStart(2, '0');
+    var mm = String(now2.getMinutes() + 5 > 59 ? 0 : now2.getMinutes() + 5).padStart(2, '0');
+    timeInput.value = hh + ':' + mm;
+  }
+
+  // 已选梦角
+  window._memoSelectedDreams = memo && memo.dreamIds ? memo.dreamIds.slice() : [];
+
+  // 渲染梦角列表
+  renderMemoDreamList();
+
+  navigateTo('pageMemoEdit');
+}
+
+function renderMemoDreamList() {
+  var container = document.getElementById('memoDreamList');
+  if (!container) return;
+  if (!state.dreams || state.dreams.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--gray);padding:8px 0;">还没有梦角</div>';
+    return;
+  }
+  container.innerHTML = state.dreams.map(function(d) {
+    var checked = window._memoSelectedDreams.indexOf(d.id) > -1;
+    var av = d.avatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2736%27 height=%2736%27 viewBox=%270 0 36 36%27%3E%3Ccircle cx=%2718%27 cy=%2718%27 r=%2718%27 fill=%27%23ffe0e8%27/%3E%3Ctext x=%2718%27 y=%2723%27 text-anchor=%27middle%27 fill=%27%23d6336c%27 font-size=%2714%27%3E💜%3C/text%3E%3C/svg%3E';
+    return '<label style="display:flex;align-items:center;padding:10px 12px;background:var(--card);border-radius:12px;border:1px solid var(--border);cursor:pointer;">' +
+      '<input type="checkbox" ' + (checked ? 'checked' : '') + ' onchange="toggleMemoDream(\'' + d.id + '\',this.checked)" style="width:18px;height:18px;margin-right:10px;accent-color:var(--blue);">' +
+      '<img src="' + av + '" style="width:32px;height:32px;border-radius:50%;margin-right:10px;object-fit:cover;">' +
+      '<span style="font-size:14px;color:var(--text);">' + d.name + '</span>' +
+      '</label>';
+  }).join('');
+}
+
+function toggleMemoDream(dreamId, checked) {
+  if (checked) {
+    if (window._memoSelectedDreams.indexOf(dreamId) === -1) {
+      window._memoSelectedDreams.push(dreamId);
+    }
+  } else {
+    var idx = window._memoSelectedDreams.indexOf(dreamId);
+    if (idx > -1) window._memoSelectedDreams.splice(idx, 1);
+  }
+}
+
+function saveMemo() {
+  initMemoData();
+  var content = (document.getElementById('memoContentInput').value || '').trim();
+  if (!content) { showToast('请写点什么'); return; }
+
+  var remindOn = document.getElementById('memoRemindToggle').classList.contains('on');
+  var dateVal = document.getElementById('memoDateInput').value;
+  var timeVal = document.getElementById('memoTimeInput').value;
+
+  if (remindOn) {
+    if (!dateVal || !timeVal) { showToast('请设置提醒日期和时间'); return; }
+    if (window._memoSelectedDreams.length === 0) { showToast('请至少选一个提醒角色'); return; }
+
+    var remindAt = new Date(dateVal + 'T' + timeVal + ':00').getTime();
+    if (isNaN(remindAt)) { showToast('日期时间无效'); return; }
+    if (remindAt <= Date.now()) { showToast('提醒时间不能早于现在'); return; }
+  }
+
+  if (window._memoEditId) {
+    // 编辑
+    var memo = state.memos.find(function(x) { return x.id === window._memoEditId; });
+    if (memo) {
+      memo.content = content;
+      memo.remindEnabled = remindOn;
+      memo.remindDate = remindOn ? dateVal : '';
+      memo.remindTime = remindOn ? timeVal : '';
+      memo.dreamIds = remindOn ? window._memoSelectedDreams.slice() : [];
+      if (!remindOn) memo.status = 'none';
+      else if (memo.status === 'none') memo.status = 'pending';
+      memo.remindedAt = 0;
+      memo.lastRemindAt = 0;
+      memo.remindedDreams = {};  // 重置每个梦角的提醒状态
+    }
+    showToast('已保存');
+  } else {
+    // 新建
+    var newMemo = {
+      id: 'memo_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      content: content,
+      remindEnabled: remindOn,
+      remindDate: remindOn ? dateVal : '',
+      remindTime: remindOn ? timeVal : '',
+      dreamIds: remindOn ? window._memoSelectedDreams.slice() : [],
+      status: remindOn ? 'pending' : 'none',
+      remindedAt: 0,
+      lastRemindAt: 0,
+      remindedDreams: {},
+      createdAt: Date.now()
+    };
+    state.memos.push(newMemo);
+    showToast('已添加');
+  }
+
+  saveState();
+  navigateTo('pageMemoList');
+}
+
+// ===== 定时检查提醒 =====
+// ===== 定时检查提醒 =====
+function checkMemoReminders() {
+  initMemoData();
+  if (state.memos.length === 0) return;
+  var now = Date.now();
+
+  state.memos.forEach(function(m) {
+    if (!m.remindEnabled) return;
+    if (m.status === 'done') return;
+    if (!m.remindDate || !m.remindTime) return;
+
+    var remindAt = new Date(m.remindDate + 'T' + m.remindTime + ':00').getTime();
+    if (isNaN(remindAt)) return;
+    if (now < remindAt) return;
+
+    // 每个梦角独立判断是否已提醒过
+    if (!m.remindedDreams || typeof m.remindedDreams !== 'object') m.remindedDreams = {};
+
+    var allDone = true;
+    m.dreamIds.forEach(function(dreamId) {
+      if (!m.remindedDreams[dreamId]) {
+        // 这个梦角还没提醒 → 触发
+        triggerMemoReminderForDream(m, dreamId);
+        m.remindedDreams[dreamId] = now;
+        allDone = false;
+      }
+    });
+
+    // 兼容旧数据：如果没有 remindedDreams 字段，用旧的方式（只挑一个）
+    if (m.dreamIds.length === 0) {
+      if (m.remindedAt && now - m.remindedAt < 60000) return;
+      triggerMemoReminder(m);
+      m.remindedAt = now;
+    }
+  });
+
+  // 如果当前正在聊天页 → 强制刷新一下，保证新卡片能立即出现
+  if (state.currentChatId) {
+    var chatPage = document.getElementById('pagePrivateChat');
+    if (chatPage && chatPage.classList.contains('active')) {
+      try {
+        loadChatMessages();
+        renderChatMessages();
+      } catch(e) {}
+    }
+  }
+  saveState();
+}
+
+function triggerMemoReminderForDream(m, dreamId) {
+  var dream = state.dreams.find(function(x) { return x.id === dreamId; });
+  if (!dream) return;
+
+  if (!state.chatSessions[dreamId]) state.chatSessions[dreamId] = [];
+  var packetId = 'mp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  var packet = {
+    from: 'dream',
+    type: 'memo',
+    packetId: packetId,
+    memoId: m.id,
+    dreamId: dreamId,
+    dreamName: dream.name,
+    content: m.content,
+    remindAt: m.remindDate + ' ' + m.remindTime,
+    time: Date.now()
+  };
+  state.chatSessions[dreamId].push(packet);
+
+  if (state.currentChatId === dreamId) {
+    loadChatMessages();
+    renderChatMessages();
+  }
+
+  // 刷新聊天列表，让红点出现
+  try { renderChatList(); } catch(e) {}
+
+  sendNotification(dream.name, '备忘录提醒');
+  showToast('📝 「' + dream.name + '」提醒你：' + (m.content.length > 18 ? m.content.slice(0, 18) + '…' : m.content));
+}
+
+function triggerMemoReminder(m) {
+  // 兼容老数据（没有 remindedDreams 字段时用）
+  if (!m.dreamIds || m.dreamIds.length === 0) return;
+  var dreamId = m.dreamIds[0];
+  triggerMemoReminderForDream(m, dreamId);
+  showToast('「' + (state.dreams.find(function(x) { return x.id === dreamId; }) || {}).name + '」提醒你：' + (m.content.length > 20 ? m.content.slice(0, 20) + '…' : m.content));
+}
+
+// ===== 稍后提醒 / 已完成 =====
+function memoLater(packetId) {
+  var found = findMemoPacket(packetId);
+  if (!found) return;
+  var memo = state.memos.find(function(x) { return x.id === found.packet.memoId; });
+  if (!memo) return;
+
+  // 5 分钟后重新提醒
+  var newTime = new Date(Date.now() + 5 * 60 * 1000);
+  memo.remindDate = newTime.getFullYear() + '-' +
+    String(newTime.getMonth() + 1).padStart(2, '0') + '-' +
+    String(newTime.getDate()).padStart(2, '0');
+  memo.remindTime = String(newTime.getHours()).padStart(2, '0') + ':' +
+    String(newTime.getMinutes()).padStart(2, '0');
+  memo.remindedAt = 0;
+  memo.remindedDreams = {};  // 重置，允许5分钟后再次全员提醒
+  saveState();
+  showToast('5 分钟后再次提醒你');
+}
+
+function memoDone(packetId) {
+  var found = findMemoPacket(packetId);
+  if (!found) return;
+  var memo = state.memos.find(function(x) { return x.id === found.packet.memoId; });
+  if (!memo) return;
+  memo.status = 'done';
+  saveState();
+  showToast('已完成');
+}
+
+function findMemoPacket(packetId) {
+  for (var cid in state.chatSessions) {
+    var msgs = state.chatSessions[cid];
+    if (!Array.isArray(msgs)) continue;
+    for (var i = 0; i < msgs.length; i++) {
+      if (msgs[i] && msgs[i].type === 'memo' && msgs[i].packetId === packetId) {
+        return { msg: msgs[i], chatId: cid, packet: msgs[i] };
+      }
+    }
+  }
+  return null;
+}
+
+// ===== 备忘录详情弹窗 =====
+window._memoDetailPacketId = null;
+
+function openMemoDetail(packetId) {
+  var found = findMemoPacket(packetId);
+  if (!found) return;
+  window._memoDetailPacketId = packetId;
+
+  var m = found.packet;
+  var memo = state.memos.find(function(x) { return x.id === m.memoId; });
+
+  var body = document.getElementById('memoDetailBody');
+  var content = memo ? memo.content : (m.content || '');
+  var remindAt = m.remindAt || (memo ? (memo.remindDate + ' ' + memo.remindTime) : '');
+  var statusText = memo && memo.status === 'done' ? '已完成' : '未完成';
+
+  var html = '';
+  html += '<div style="font-size:11px;color:#86868b;margin-bottom:10px;">⏰ ' + escapeHtml(remindAt) + ' · ' + statusText + '</div>';
+  html += '<div style="padding:14px 16px;background:#f8f8fa;border-radius:12px;font-size:14px;color:#1d1d1f;line-height:1.7;white-space:pre-wrap;word-break:break-word;max-height:50vh;overflow-y:auto;">' + escapeHtml(content) + '</div>';
+
+  body.innerHTML = html;
+  document.getElementById('memoDetailModal').classList.add('show');
+}
+
+function closeMemoDetailModal() {
+  document.getElementById('memoDetailModal').classList.remove('show');
+  window._memoDetailPacketId = null;
+}
+
+function memoDetailLater() {
+  var packetId = window._memoDetailPacketId;
+  if (!packetId) return;
+  memoLater(packetId);
+  closeMemoDetailModal();
+}
+
+function memoDetailDone() {
+  var packetId = window._memoDetailPacketId;
+  if (!packetId) return;
+  memoDone(packetId);
+  closeMemoDetailModal();
+  // 如果当前在聊天页，刷新一下，让卡片状态更新
+  if (state.currentChatId) {
+    loadChatMessages();
+    renderChatMessages();
+  }
+}
+
+// ===== 抉择功能 =====
+function openChoicePanel() {
+  document.getElementById('actionMenuPanel').style.display = 'none';
+
+  // 只支持私聊
+  if (!state.currentChatId || state.currentChatId.startsWith('group_')) {
+    showToast('抉择只能在私聊里使用');
+    return;
+  }
+
+  document.getElementById('choiceQuestionInput').value = '';
+  document.getElementById('choiceOptionsContainer').innerHTML = '';
+  addChoiceOption();
+  addChoiceOption();
+
+  document.getElementById('choiceModal').classList.add('show');
+  setTimeout(function() {
+    document.getElementById('choiceQuestionInput').focus();
+  }, 100);
+}
+
+function closeChoiceModal() {
+  document.getElementById('choiceModal').classList.remove('show');
+}
+
+function addChoiceOption() {
+  var container = document.getElementById('choiceOptionsContainer');
+  var count = container.querySelectorAll('.quiz-opt-row').length;
+  if (count >= 10) { showToast('最多 10 个选项'); return; }
+  var row = document.createElement('div');
+  row.className = 'quiz-opt-row';
+  row.innerHTML = '<input type="text" placeholder="选项 ' + (count + 1) + '"><span class="quiz-opt-del">×</span>';
+  container.appendChild(row);
+  row.querySelector('.quiz-opt-del').onclick = function() {
+    if (container.querySelectorAll('.quiz-opt-row').length <= 2) {
+      showToast('至少保留 2 个选项');
+      return;
+    }
+    row.remove();
+  };
+  var inp = row.querySelector('input');
+  inp.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addChoiceOption();
+    }
+  });
+}
+
+function sendChoice() {
+  var question = (document.getElementById('choiceQuestionInput').value || '').trim();
+  if (!question) { showToast('请输入问题'); return; }
+
+  var rows = document.querySelectorAll('#choiceOptionsContainer .quiz-opt-row');
+  var options = [];
+  rows.forEach(function(r) {
+    var v = (r.querySelector('input').value || '').trim();
+    if (v) options.push(v);
+  });
+  if (options.length < 2) { showToast('至少 2 个选项'); return; }
+
+  if (!state.currentChatId) { showToast('请先进入聊天'); return; }
+
+  var packetId = 'ch_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  var packet = {
+    from: 'user',
+    type: 'choice',
+    packetId: packetId,
+    askerId: 'user',
+    askerName: state.profile.name || '我',
+    targetId: state.currentChatId,
+    question: question,
+    options: options.slice(),
+    answer: null,
+    time: Date.now()
+  };
+
+  if (!state.chatSessions[state.currentChatId]) state.chatSessions[state.currentChatId] = [];
+  state.chatSessions[state.currentChatId].push(packet);
+  saveState();
+  loadChatMessages();
+  renderChatMessages();
+  closeChoiceModal();
+
+  // 梦角延迟 3-15 秒回答
+  var dreamId = state.currentChatId;
+  var delay = 3000 + Math.random() * 12000;
+  setTimeout(function() {
+    choiceDreamAnswer(packetId, dreamId);
+  }, delay);
+}
+
+function choiceDreamAnswer(packetId, dreamId) {
+  var msgs = state.chatSessions[dreamId] || [];
+  var packet = null;
+  for (var i = 0; i < msgs.length; i++) {
+    if (msgs[i] && msgs[i].type === 'choice' && msgs[i].packetId === packetId) {
+      packet = msgs[i]; break;
+    }
+  }
+  if (!packet) return;
+  if (packet.answer) return; // 已回答
+
+  var dream = state.dreams.find(function(x) { return x.id === dreamId; });
+  if (!dream) return;
+
+  // 随机选一个选项
+  var pick = packet.options[Math.floor(Math.random() * packet.options.length)];
+  packet.answer = pick;
+  packet.answererId = dreamId;
+  packet.answererName = dream.name;
+  packet.answeredAt = Date.now();
+
+  // 在聊天里加一条梦角的回复消息
+  if (!state.chatSessions[dreamId]) state.chatSessions[dreamId] = [];
+  state.chatSessions[dreamId].push({
+    from: 'dream',
+    senderId: dreamId,
+    senderAvatar: dream.avatar || '',
+    text: pick,
+    time: Date.now()
+  });
+  saveState();
+
+  if (state.currentChatId === dreamId) {
+    loadChatMessages();
+    renderChatMessages();
+  }
+
+  try { renderChatList(); } catch(e) {}
+  sendNotification(dream.name, '选择了「' + pick + '」');
+}
+
+// ===== 头像库 =====
+window._avatarEditMode = false;
+window._avatarSelected = [];
+
+function initAvatarData() {
+  if (!state.avatarLibrary || !Array.isArray(state.avatarLibrary)) state.avatarLibrary = [];
+  if (state.lastAvatarScan === undefined) state.lastAvatarScan = 0;
+}
+
+function renderAvatarLib() {
+  initAvatarData();
+  var grid = document.getElementById('avatarLibGrid');
+  var editBtn = document.getElementById('avatarEditBtn');
+  if (!grid) return;
+
+  if (editBtn) {
+    editBtn.textContent = window._avatarEditMode ? '完成' : '编辑';
+    editBtn.style.color = window._avatarEditMode ? 'var(--red)' : 'var(--blue)';
+  }
+
+  if (state.avatarLibrary.length === 0) {
+    grid.innerHTML = '<div class="avatar-lib-empty">还没有头像<br>点右上角 + 导入一批图片吧<br><span style="font-size:11px;opacity:0.7;margin-top:6px;display:block;">导入后梦角有概率随机更换成这里的头像</span></div>';
+    return;
+  }
+
+  var html = '';
+  state.avatarLibrary.forEach(function(img, i) {
+    var selected = window._avatarSelected.indexOf(i) > -1;
+    html += '<div class="avatar-lib-item' + (selected ? ' selected' : '') + '" onclick="avatarItemClick(' + i + ')">';
+    html += '<img src="' + img + '">';
+    if (window._avatarEditMode) {
+      html += '<div class="avatar-lib-check' + (selected ? ' checked' : '') + '">' + (selected ? '✓' : '') + '</div>';
+    }
+    html += '</div>';
+  });
+  grid.innerHTML = html;
+}
+
+function avatarItemClick(i) {
+  if (window._avatarEditMode) {
+    var pos = window._avatarSelected.indexOf(i);
+    if (pos > -1) window._avatarSelected.splice(pos, 1);
+    else window._avatarSelected.push(i);
+    renderAvatarLib();
+  }
+}
+
+function toggleAvatarEdit() {
+  window._avatarEditMode = !window._avatarEditMode;
+  if (!window._avatarEditMode) window._avatarSelected = [];
+  renderAvatarLib();
+  if (window._avatarEditMode) {
+    // 编辑模式下，右上角 + 号在编辑时禁用（避免误触）
+    showToast('点击图片可多选');
+  }
+}
+
+function openAvatarImport() {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.multiple = true;
+  input.onchange = function(e) {
+    var files = e.target.files;
+    if (!files || files.length === 0) return;
+    var total = files.length;
+    showToast('正在处理 ' + total + ' 张图片…');
+
+    var promises = [];
+    for (var i = 0; i < total; i++) {
+      promises.push(compressAvatarImg(files[i]));
+    }
+    Promise.all(promises).then(function(results) {
+      initAvatarData();
+      results.forEach(function(r) {
+        if (r) state.avatarLibrary.push(r);
+      });
+      saveState();
+      renderAvatarLib();
+      showToast('成功导入 ' + results.length + ' 张');
+    }).catch(function(err) {
+      showToast('导入失败：' + err.message);
+    });
+  };
+  input.click();
+}
+
+function compressAvatarImg(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var img = new Image();
+      img.onload = function() {
+        var canvas = document.createElement('canvas');
+        var MAX_SIZE = 400;
+        var w = img.width, h = img.height;
+        if (w > h) {
+          if (w > MAX_SIZE) { h *= MAX_SIZE / w; w = MAX_SIZE; }
+        } else {
+          if (h > MAX_SIZE) { w *= MAX_SIZE / h; h = MAX_SIZE; }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.75));
+      };
+      img.onerror = function() { reject(new Error('图片加载失败')); };
+      img.src = ev.target.result;
+    };
+    reader.onerror = function() { reject(new Error('读取失败')); };
+    reader.readAsDataURL(file);
+  });
+}
+
+// 编辑模式下，如果需要删除选中的头像
+// 由于顶部 + 号在编辑模式下不方便换图标，我们让 + 号在编辑模式下变成"删除"
+// 其实更好的方案：用长按或额外按钮。这里采用"编辑模式下，+ 号变为删除"的临时方案不可靠
+// 采用：编辑模式时，页面里加一个删除按钮条
+// —— 简化：编辑模式下按钮显示"删除"，点击后删
+
+// 重写 toggleAvatarEdit 更完善：
+var _origToggleAvatarEdit = toggleAvatarEdit;
+toggleAvatarEdit = function() {
+  if (window._avatarEditMode) {
+    // 退出编辑模式
+    window._avatarEditMode = false;
+    window._avatarSelected = [];
+    renderAvatarLib();
+    return;
+  }
+  // 进入编辑模式
+  window._avatarEditMode = true;
+  window._avatarSelected = [];
+  renderAvatarLib();
+  // 显示操作条
+  showAvatarEditBar();
+};
+
+function showAvatarEditBar() {
+  var old = document.getElementById('avatarEditBar');
+  if (old) old.remove();
+  var bar = document.createElement('div');
+  bar.id = 'avatarEditBar';
+  bar.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(255,255,255,0.96);border-top:1px solid #e5e5ea;padding:14px 16px 24px;box-sizing:border-box;display:flex;gap:12px;z-index:30;';
+  bar.innerHTML =
+    '<button onclick="avatarSelectAll()" style="flex:1;padding:16px 10px;border-radius:14px;font-size:16px;font-weight:600;border:1px solid #e5e5ea;background:#fff;color:#1d1d1f;cursor:pointer;font-family:inherit;">全选</button>' +
+    '<button onclick="avatarDeleteSelected()" style="flex:1;padding:16px 10px;border-radius:14px;font-size:16px;font-weight:600;border:none;background:rgba(255,59,48,0.9);color:#fff;cursor:pointer;font-family:inherit;">删除</button>' +
+    '<button onclick="avatarCancelEdit()" style="flex:1;padding:16px 10px;border-radius:14px;font-size:16px;font-weight:600;border:1px solid #e5e5ea;background:#fff;color:#1d1d1f;cursor:pointer;font-family:inherit;">取消</button>';
+  var page = document.getElementById('pageAvatar');
+  if (page) page.appendChild(bar);
+}
+
+function removeAvatarEditBar() {
+  var bar = document.getElementById('avatarEditBar');
+  if (bar) bar.remove();
+}
+
+function avatarSelectAll() {
+  if (window._avatarSelected.length === state.avatarLibrary.length) {
+    window._avatarSelected = [];
+  } else {
+    window._avatarSelected = state.avatarLibrary.map(function(_, i) { return i; });
+  }
+  renderAvatarLib();
+}
+
+function avatarDeleteSelected() {
+  if (window._avatarSelected.length === 0) {
+    showToast('请先选择要删除的头像');
+    return;
+  }
+  if (!confirm('确定删除选中的 ' + window._avatarSelected.length + ' 张头像吗？')) return;
+
+  var sorted = window._avatarSelected.slice().sort(function(a, b) { return b - a; });
+  sorted.forEach(function(i) { state.avatarLibrary.splice(i, 1); });
+  window._avatarSelected = [];
+  saveState();
+  renderAvatarLib();
+  showToast('已删除');
+}
+
+function avatarCancelEdit() {
+  window._avatarEditMode = false;
+  window._avatarSelected = [];
+  removeAvatarEditBar();
+  renderAvatarLib();
+}
+
+// 每次渲染头像页时，同步编辑条
+var _origRenderAvatarLib = renderAvatarLib;
+renderAvatarLib = function() {
+  _origRenderAvatarLib();
+  if (window._avatarEditMode) {
+    showAvatarEditBar();
+  } else {
+    removeAvatarEditBar();
+  }
+};
+
+// ===== 头像自动更换扫描 =====
+function checkAvatarRandomChange() {
+  initAvatarData();
+  if (state.avatarLibrary.length === 0) return;
+  if (!state.dreams || state.dreams.length === 0) return;
+
+  var now = Date.now();
+  var last = state.lastAvatarScan || 0;
+  var THREE_HOURS = 3 * 60 * 60 * 1000;
+  if (now - last < THREE_HOURS) return;
+
+  state.lastAvatarScan = now;
+  saveState();
+
+  // 30% 概率触发一次更换
+  if (Math.random() > 0.30) return;
+
+  // 随机选一个梦角和一个头像
+  var dream = state.dreams[Math.floor(Math.random() * state.dreams.length)];
+  var img = state.avatarLibrary[Math.floor(Math.random() * state.avatarLibrary.length)];
+
+  // 50% 给自己换 / 50% 给用户换
+  if (Math.random() < 0.5) {
+    // 梦角给自己换
+    dream.avatar = img;
+    // 同步旧的 state.dream
+    if (state.dream && state.dream.id === dream.id) {
+      state.dream = Object.assign({}, dream);
+    }
+    addAvatarSystemMsg(dream.id, '「' + dream.name + '」为自己更换了头像');
+    showToast('「' + dream.name + '」换了新头像');
+  } else {
+    // 给用户换
+    state.profile.avatar = img;
+    addAvatarSystemMsg(dream.id, '「' + dream.name + '」为' + (state.profile.name || '我') + '更换了头像');
+    showToast('「' + dream.name + '」为你换了新头像');
+    try { renderDiaryCover(); } catch(e) {}
+    // 如果当前在个人主页，刷新
+    try { loadProfileForm(); } catch(e) {}
+  }
+
+  saveState();
+  try { renderChatList(); } catch(e) {}
+  try { renderDreamRoles(); } catch(e) {}
+}
+
+function addAvatarSystemMsg(chatId, text) {
+  if (!state.chatSessions[chatId]) state.chatSessions[chatId] = [];
+  state.chatSessions[chatId].push({ from: 'system', text: text, time: Date.now() });
+  saveState();
+  if (state.currentChatId === chatId) {
+    loadChatMessages();
+    renderChatMessages();
+  }
+  try { renderChatList(); } catch(e) {}
+}
+
+// ===== 主屏幕图标红点 =====
+function getChatUnreadCount() {
+  var total = 0;
+  if (state.dreams) {
+    state.dreams.forEach(function(d) {
+      if (state.mutedChats && state.mutedChats.indexOf(d.id) > -1) return;
+      var lr = (state.lastReadAt && state.lastReadAt[d.id]) || 0;
+      (state.chatSessions[d.id] || []).forEach(function(x) {
+        if (x.from === 'dream' && x.time > lr) total++;
+      });
+    });
+  }
+  if (state.groups) {
+    state.groups.forEach(function(g) {
+      if (state.mutedChats && state.mutedChats.indexOf(g.id) > -1) return;
+      var lr2 = (state.lastReadAt && state.lastReadAt[g.id]) || 0;
+      (state.chatSessions[g.id] || []).forEach(function(x) {
+        if (x.from === 'dream' && x.time > lr2) total++;
+      });
+    });
+  }
+  return total;
+}
+
+function getMailUnreadCount() {
+  if (!state.mails) return 0;
+  return state.mails.filter(function(m) { return m.from !== 'user' && !m.read; }).length;
+}
+
+function updateAppIconBadges() {
+  function applyBadge(key, count) {
+    var icon = document.querySelector('.app-icon[data-app-key="' + key + '"]');
+    if (!icon) return;
+    var imgDiv = icon.querySelector('.app-icon-img');
+    if (!imgDiv) return;
+    imgDiv.style.position = 'relative';
+    var old = imgDiv.querySelector('.app-icon-badge');
+    if (old) old.remove();
+    if (count > 0) {
+      var b = document.createElement('span');
+      b.className = 'app-icon-badge';
+      b.textContent = count > 99 ? '99+' : count;
+      imgDiv.appendChild(b);
+    }
+  }
+  applyBadge('pageChatList', getChatUnreadCount());
+  applyBadge('pageMailbox', getMailUnreadCount());
+}
+
+// ===== 小组件框架 =====
+window._wdTab = 'small';
+
+window._wdDragState = null;
+window._wdPressTimer = null;
+window._wdPressTarget = null;
+window._wdPressStartX = 0;
+window._wdPressStartY = 0;
+
+// 组件元数据（所有可选组件都在这里注册）
+var WIDGET_TYPES = {
+  battery: {
+    name: '电量',
+    desc: '实时显示手机电量',
+    size: 'small',
+    emoji: '🔋',
+    // 该组件的可配置项定义（编辑页会自动生成表单）
+    fields: [
+      { key: 'bg', type: 'image', label: '背景图' },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'color', type: 'color', label: '进度环颜色' },
+      { key: 'phoneColor', type: 'color', label: '手机图标颜色' },
+      { key: 'textColor', type: 'color', label: '百分比文字颜色' }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#ffffff',
+      bgOpacity: 1,
+      color: '#ff8fb1',
+      phoneColor: '#333333',
+      textColor: '#1d1d1f'
+    }
+  },
+
+  coupleL: {
+    name: '情侣播放器（大号）',
+    desc: '情侣头像 + 音乐卡片',
+    size: 'large',
+    emoji: '💑',
+    fields: [
+      { key: 'bg', type: 'image', label: '背景图' },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'avatar1', type: 'image', label: '头像 1（左）' },
+      { key: 'bubble1', type: 'text', label: '气泡文字 1（左）' },
+      { key: 'avatar2', type: 'image', label: '头像 2（右）' },
+      { key: 'bubble2', type: 'text', label: '气泡文字 2（右）' },
+      { key: 'quote', type: 'text', label: '中间小字' },
+      { key: 'songName', type: 'text', label: '歌曲名' },
+      { key: 'cardColor', type: 'color', label: '卡片颜色' },
+      { key: 'cardOpacity', type: 'range', label: '卡片不透明度', min: 0, max: 1, step: 0.05 }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#ffffff',
+      bgOpacity: 1,
+      avatar1: null,
+      bubble1: '你在左边',
+      avatar2: null,
+      bubble2: '我紧靠右',
+      quote: '我会在每个见不到你的日子里保持想念',
+      songName: 'Pink Lavender',
+      cardColor: '#ffffff',
+      cardOpacity: 0.6
+    }
+  },
+
+  couple: {
+    name: '情侣播放器',
+    desc: '情侣头像 + 音乐卡片',
+    size: 'small',
+    emoji: '💑',
+    fields: [
+      { key: 'bg', type: 'image', label: '背景图' },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'avatar1', type: 'image', label: '头像 1（左）' },
+      { key: 'bubble1', type: 'text', label: '气泡文字 1（左）' },
+      { key: 'avatar2', type: 'image', label: '头像 2（右）' },
+      { key: 'bubble2', type: 'text', label: '气泡文字 2（右）' },
+      { key: 'quote', type: 'text', label: '中间小字' },
+      { key: 'songName', type: 'text', label: '歌曲名' },
+      { key: 'cardColor', type: 'color', label: '卡片颜色' },
+      { key: 'cardOpacity', type: 'range', label: '卡片不透明度', min: 0, max: 1, step: 0.05 }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#ffffff',
+      bgOpacity: 1,
+      avatar1: null,
+      bubble1: '你在左边',
+      avatar2: null,
+      bubble2: '我紧靠右',
+      quote: '我会在每个见不到你的日子里保持想念',
+      songName: 'Pink Lavender',
+      cardColor: '#ffffff',
+      cardOpacity: 0.6
+    }
+  },
+
+    cherry: {
+    name: 'Cherry 樱花',
+    desc: '双头像 + 文案 + 定位',
+    size: 'large',
+    emoji: '🌸',
+    fields: [
+      { key: 'bg', type: 'image', label: '背景图' },
+      { key: 'bgBlur', type: 'range', label: '背景模糊度', min: 0, max: 20, step: 1, isPx: true },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'cardColor', type: 'color', label: '底部卡片颜色' },
+      { key: 'cardOpacity', type: 'range', label: '底部卡片不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'avatar1', type: 'image', label: '头像 1（左）' },
+      { key: 'avatar2', type: 'image', label: '头像 2（右）' },
+      { key: 'name1', type: 'text', label: '文案 1（左名字）' },
+      { key: 'name2', type: 'text', label: '文案 2（右名字）' },
+      { key: 'quote', type: 'text', label: '文案 3（中间小字）' },
+      { key: 'location', type: 'text', label: '文案 4（定位）' },
+      { key: 'textColor', type: 'color', label: '文字颜色' }
+    ],
+    defaults: {
+      bg: null,
+      bgBlur: 0,
+      bgColor: '#a8d8f0',
+      bgOpacity: 1,
+      cardColor: '#ffffff',
+      cardOpacity: 0.95,
+      avatar1: null,
+      avatar2: null,
+      name1: 'Cherry_ss.',
+      name2: 'Raven><.',
+      quote: '— * 花瓣飘落的速度是秒速五厘米。*⁺* ˚ * —',
+      location: '📍 Tokyo  京都市',
+      textColor: '#1d1d1f'
+    }
+  },
+
+    vinyl: {
+    name: '黑胶唱片',
+    desc: '九宫格图片 + 唱片文案',
+    size: 'large',
+    emoji: '💿',
+    fields: [
+      { key: 'bg', type: 'image', label: '整体背景图' },
+      { key: 'bgColor', type: 'color', label: '整体背景色' },
+      { key: 'bgOpacity', type: 'range', label: '整体背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'discImg', type: 'image', label: '唱片封面图' },
+      { key: 'img1', type: 'image', label: '图片 1（左上）' },
+      { key: 'img2', type: 'image', label: '图片 2（左中上）' },
+      { key: 'img3', type: 'image', label: '图片 3（左中下）' },
+      { key: 'img4', type: 'image', label: '图片 4（左下）' },
+      { key: 'img5', type: 'image', label: '图片 5（右上）' },
+      { key: 'img6', type: 'image', label: '图片 6（右中上）' },
+      { key: 'img7', type: 'image', label: '图片 7（右中下）' },
+      { key: 'img8', type: 'image', label: '图片 8（右下）' },
+      { key: 'text1', type: 'text', label: '文案 1（歌名）' },
+      { key: 'text2', type: 'text', label: '文案 2（主文案）' },
+      { key: 'text3', type: 'text', label: '文案 3（副文案）' },
+      { key: 'textColor', type: 'color', label: '文字颜色' },
+      { key: 'cardColor', type: 'color', label: '文案卡片颜色' },
+      { key: 'cardOpacity', type: 'range', label: '文案卡片不透明度', min: 0, max: 1, step: 0.05 }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#e8eaec',
+      bgOpacity: 1,
+      discImg: null,
+      img1: null, img2: null, img3: null, img4: null,
+      img5: null, img6: null, img7: null, img8: null,
+      text1: 'You Belong with Me  —  Taylor...',
+      text2: 'But she wears short\nskirts, I wear T-shirts',
+      text3: "She's Cheer Captain and I'm...",
+      textColor: '#1d1d1f',
+      cardColor: '#d8dce0',
+      cardOpacity: 0.9
+    }
+  },
+
+    snowscape: {
+    name: '雪景卡片',
+    desc: '拍立得 + 卡片文案',
+    size: 'large',
+    emoji: '❄️',
+    fields: [
+      { key: 'bg', type: 'image', label: '整体背景图' },
+      { key: 'bgBlur', type: 'range', label: '背景模糊度', min: 0, max: 20, step: 1, isPx: true },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'polaroid', type: 'image', label: '拍立得小图（左上倾斜）' },
+      { key: 'mainImg', type: 'image', label: '主图（左上正面）' },
+      { key: 'enjoyText', type: 'text', label: '右上卡片文字（Enjoy life）' },
+      { key: 'romanceText', type: 'text', label: '左下卡片主文案（Romance）' },
+      { key: 'romanceSub', type: 'text', label: '左下卡片副文案（Winter day Letter）' },
+      { key: 'bottomImg', type: 'image', label: '右下横图' },
+      { key: 'bottomText', type: 'text', label: '右下横图下方文字' },
+      { key: 'textColor', type: 'color', label: '文字颜色' }
+    ],
+    defaults: {
+      bg: null,
+      bgBlur: 0,
+      bgColor: '#d8dce0',
+      bgOpacity: 1,
+      polaroid: null,
+      mainImg: null,
+      enjoyText: 'Enjoy life',
+      romanceText: 'Romance',
+      romanceSub: 'Winter day Letter',
+      bottomImg: null,
+      bottomText: 'Just Like That',
+      textColor: '#ffffff'
+    }
+  },
+
+    fourpics: {
+    name: '四图卡片',
+    desc: '四张图片 + 底部小条',
+    size: 'medium',
+    emoji: '🖼️',
+    fields: [
+      { key: 'bg', type: 'image', label: '整体背景图' },
+      { key: 'bgColor', type: 'color', label: '整体背景色' },
+      { key: 'bgOpacity', type: 'range', label: '整体背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'radius', type: 'range', label: '卡片圆角', min: 0, max: 20, step: 1, isPx: true },
+      { key: 'img1', type: 'image', label: '图片 1' },
+      { key: 'text1', type: 'text', label: '文字 1' },
+      { key: 'barColor1', type: 'color', label: '横条颜色 1' },
+      { key: 'img2', type: 'image', label: '图片 2' },
+      { key: 'text2', type: 'text', label: '文字 2' },
+      { key: 'barColor2', type: 'color', label: '横条颜色 2' },
+      { key: 'img3', type: 'image', label: '图片 3' },
+      { key: 'text3', type: 'text', label: '文字 3' },
+      { key: 'barColor3', type: 'color', label: '横条颜色 3' },
+      { key: 'img4', type: 'image', label: '图片 4' },
+      { key: 'text4', type: 'text', label: '文字 4' },
+      { key: 'barColor4', type: 'color', label: '横条颜色 4' }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#c8dcc0',
+      bgOpacity: 1,
+      radius: 10,
+      img1: null, text1: '// ๑ω๑ //', barColor1: '#5a7a5a',
+      img2: null, text2: '♥ + ♥ = ♥²', barColor2: '#5a7a5a',
+      img3: null, text3: 'ʕ•ᴥ•ʔ', barColor3: '#5a7a5a',
+      img4: null, text4: 'ə♥ə', barColor4: '#5a7a5a'
+    }
+  },
+
+  annicard: {
+    name: '纪念日卡片',
+    desc: '三条纪念日 + 背景图',
+    size: 'medium',
+    emoji: '🎂',
+    fields: [
+      { key: 'bg', type: 'image', label: '背景图' },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'cardOpacity', type: 'range', label: '卡片不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'textColor', type: 'color', label: '文字颜色' },
+      { key: 'title1', type: 'text', label: '纪念日 1 名称' },
+      { key: 'date1', type: 'text', label: '纪念日 1 日期（格式 2020-01-01）' },
+      { key: 'title2', type: 'text', label: '纪念日 2 名称' },
+      { key: 'date2', type: 'text', label: '纪念日 2 日期' },
+      { key: 'title3', type: 'text', label: '纪念日 3 名称' },
+      { key: 'date3', type: 'text', label: '纪念日 3 日期' }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#6a90b8',
+      bgOpacity: 1,
+      cardOpacity: 0.35,
+      textColor: '#ffffff',
+      title1: '我們在一起已經',
+      date1: '2020-01-01',
+      title2: '距離Ta的生日還有',
+      date2: '2025-12-31',
+      title3: '離葡萄酒情人節還有',
+      date3: '2025-11-14'
+    }
+  },
+
+  musiccard: {
+    name: '音乐播放卡片',
+    desc: '专辑封面 + 歌曲 + 控制按钮',
+    size: 'medium',
+    emoji: '🎵',
+    fields: [
+      { key: 'bg', type: 'image', label: '背景图' },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'cover', type: 'image', label: '专辑封面' },
+      { key: 'songName', type: 'text', label: '歌曲名' },
+      { key: 'artistName', type: 'text', label: '歌手名' },
+      { key: 'textColor', type: 'color', label: '文字颜色' },
+      { key: 'barColor', type: 'color', label: '进度条颜色' }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#f0d8c8',
+      bgOpacity: 1,
+      cover: null,
+      songName: 'This is What You Came',
+      artistName: 'Calvin Harris/Rihanna',
+      textColor: '#ffffff',
+      barColor: '#ffffff'
+    }
+  },
+
+  glassy: {
+    name: '玻璃心温度',
+    desc: '温度 + 日期 + 状态 + 图片',
+    size: 'medium',
+    emoji: '🌡️',
+    fields: [
+      { key: 'bg', type: 'image', label: '背景图' },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'tempColor', type: 'color', label: '温度颜色' },
+      { key: 'textColor', type: 'color', label: '小字颜色' },
+      { key: 'caption1', type: 'text', label: '文案 1' },
+      { key: 'caption2', type: 'text', label: '文案 2' },
+      { key: 'img', type: 'image', label: '右侧图片' }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#f5f0e8',
+      bgOpacity: 1,
+      tempColor: '#b8a99a',
+      textColor: '#b8a99a',
+      caption1: 'More than love!!',
+      caption2: 'TIME  |  1/2  ❤️  1/2',
+      img: null
+    }
+  },
+
+  anniversary: {
+    name: '纪念日',
+    desc: '一起多少天 + 两张图',
+    size: 'small',
+    emoji: '💗',
+    fields: [
+      { key: 'bg', type: 'image', label: '整体背景图' },
+      { key: 'bgColor', type: 'color', label: '整体背景色' },
+      { key: 'bgOpacity', type: 'range', label: '整体背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'eventName', type: 'text', label: '事件名称（如：和宝宝一起的）' },
+      { key: 'targetDate', type: 'text', label: '目标日（格式 2020-01-01）' },
+      { key: 'cardBg', type: 'image', label: '顶部卡片背景图' },
+      { key: 'cardColor', type: 'color', label: '顶部卡片颜色' },
+      { key: 'cardOpacity', type: 'range', label: '顶部卡片不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'textColor', type: 'color', label: '文字颜色' },
+      { key: 'img1', type: 'image', label: '图片 1（左）' },
+      { key: 'img2', type: 'image', label: '图片 2（右）' }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#fce4ec',
+      bgOpacity: 1,
+      eventName: '和宝宝一起的',
+      targetDate: '2025-07-07',
+      cardBg: null,
+      cardColor: '#ffd1dc',
+      cardOpacity: 0.6,
+      textColor: '#ffffff',
+      img1: null,
+      img2: null
+    }
+  },
+
+  japanese: {
+    name: '日系水色',
+    desc: '标题 + 两条消息 + 双头像',
+    size: 'small',
+    emoji: '💧',
+    fields: [
+      { key: 'bg', type: 'image', label: '背景图' },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'title', type: 'text', label: '顶部标题' },
+      { key: 'titleColor', type: 'color', label: '标题颜色' },
+      { key: 'avatar1', type: 'image', label: '头像 1（左）' },
+      { key: 'msg1', type: 'text', label: '文案 1（左）' },
+      { key: 'msg2', type: 'text', label: '文案 2（右）' },
+      { key: 'avatar2', type: 'image', label: '头像 2（右）' },
+      { key: 'bubbleColor', type: 'color', label: '气泡颜色' },
+      { key: 'bubbleOpacity', type: 'range', label: '气泡不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'textColor', type: 'color', label: '文字颜色' }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#e8f0f8',
+      bgOpacity: 1,
+      title: '†. 水色の猫.†',
+      titleColor: '#a8c8e0',
+      avatar1: null,
+      msg1: '⌒* で心臟 する ✕*',
+      msg2: '✧* を縫合 する ✕*',
+      avatar2: null,
+      bubbleColor: '#ffffff',
+      bubbleOpacity: 0.6,
+      textColor: '#8fa8bf'
+    }
+  },
+
+     chat: {
+    name: '聊天记录',
+    desc: '三条聊天气泡',
+    size: 'small',
+    emoji: '💬',
+    fields: [
+      { key: 'bg', type: 'image', label: '背景图' },
+      { key: 'bgColor', type: 'color', label: '背景颜色' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'msg1', type: 'text', label: '文案 1（左侧）' },
+      { key: 'msg2', type: 'text', label: '文案 2（右侧）' },
+      { key: 'msg3', type: 'text', label: '文案 3（左侧）' },
+      { key: 'bubble1Color', type: 'color', label: '左气泡颜色' },
+      { key: 'bubble2Color', type: 'color', label: '右气泡颜色' },
+      { key: 'textColor1', type: 'color', label: '左气泡文字颜色' },
+      { key: 'textColor2', type: 'color', label: '右气泡文字颜色' }
+    ],
+    defaults: {
+      bg: null,
+      bgColor: '#f5f5f7',
+      bgOpacity: 1,
+      msg1: '晚上好啊，明天一起去逛街吗 (｡･ω･｡)',
+      msg2: '好啊，那我去睡觉啦，明天见～',
+      msg3: '晚安～',
+      bubble1Color: '#ffffff',
+      bubble2Color: '#a8d8e8',
+      textColor1: '#333333',
+      textColor2: '#1d1d1f'
+    }
+  },
+  summerwave: {
+    name: 'Summer Wave',
+    desc: '双层图片 + 文字卡片',
+    size: 'small',
+    emoji: '🌊',
+    fields: [
+      { key: 'bg', type: 'image', label: '外层背景图' },
+      { key: 'bgBlur', type: 'range', label: '背景模糊度', min: 0, max: 20, step: 1, isPx: true },
+      { key: 'bgColor', type: 'color', label: '背景颜色（无图时）' },
+      { key: 'bgOpacity', type: 'range', label: '背景不透明度', min: 0, max: 1, step: 0.05 },
+      { key: 'innerImg', type: 'image', label: '内层图片' },
+      { key: 'text', type: 'text', label: '底部文字' },
+      { key: 'textColor', type: 'color', label: '文字颜色' },
+      { key: 'textSize', type: 'range', label: '文字大小', min: 10, max: 24, step: 1, isPx: true }
+    ],
+    defaults: {
+      bg: null,
+      bgBlur: 0,
+      bgColor: '#a8d8e8',
+      bgOpacity: 1,
+      innerImg: null,
+      text: 'Summer Wave',
+      textColor: '#ffffff',
+      textSize: 16
+    }
+  }
+  // 其他组件陆续加到这里
+};
+
+function initWidgetData() {
+  if (!state.widgets || !Array.isArray(state.widgets)) state.widgets = [];
+}
+
+function switchWidgetTab(tab) {
+  window._wdTab = tab;
+  var tabs = [
+    { id: 'wdTabSmall', key: 'small' },
+    { id: 'wdTabMedium', key: 'medium' },
+    { id: 'wdTabLarge', key: 'large' }
+  ];
+  tabs.forEach(function(t) {
+    var el = document.getElementById(t.id);
+    if (!el) return;
+    if (t.key === tab) {
+      el.style.color = 'var(--blue)';
+      el.style.borderBottom = '2px solid var(--blue)';
+    } else {
+      el.style.color = 'var(--gray)';
+      el.style.borderBottom = '2px solid transparent';
+    }
+  });
+  renderWidgetLib();
+}
+
+function renderWidgetLib() {
+  var content = document.getElementById('widgetLibContent');
+  if (!content) return;
+
+  var list = [];
+  for (var k in WIDGET_TYPES) {
+    if (WIDGET_TYPES[k].size === window._wdTab) list.push({ key: k, meta: WIDGET_TYPES[k] });
+  }
+
+  if (list.length === 0) {
+    content.innerHTML = '<div style="padding:60px 20px;text-align:center;color:var(--gray);font-size:13px;">这个尺寸还没有组件</div>';
+    return;
+  }
+
+  // 小号 2 列，中号/大号 1 列
+  var gridClass = (window._wdTab === 'small') ? 'widget-lib-grid' : 'widget-lib-grid widget-lib-grid-single';
+  var html = '<div class="' + gridClass + '">';
+  list.forEach(function(item) {
+    var m = item.meta;
+    var inner = renderWidgetInner(item.key, m.defaults);
+    html += '<div class="widget-lib-cell" onclick="openWidgetEdit(\'' + item.key + '\')">';
+    html += '<div class="widget-lib-preview ' + m.size + '">';
+    html += '<div class="widget-lib-preview-inner">' + inner + '</div>';
+    html += '</div>';
+    html += '<div class="widget-lib-name">' + m.name + '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  content.innerHTML = html;
+}
+
+function openWidgetEdit(typeKey) {
+  var meta = WIDGET_TYPES[typeKey];
+  if (!meta) return;
+  window._wdEditingType = typeKey;
+  window._wdEditingId = null;
+  window._wdEditingConfig = JSON.parse(JSON.stringify(meta.defaults));
+
+  document.getElementById('widgetEditTitle').textContent = meta.name;
+  renderWidgetEditForm();
+  renderWidgetPreview();
+  navigateTo('pageWidgetEdit');
+}
+
+function renderWidgetEditForm() {
+  var meta = WIDGET_TYPES[window._wdEditingType];
+  var area = document.getElementById('widgetConfigArea');
+  if (!area || !meta) return;
+
+  var html = '';
+  meta.fields.forEach(function(f) {
+    html += '<div class="wd-cfg-item">';
+    html += '<label class="wd-cfg-label">' + f.label + '</label>';
+
+    if (f.type === 'text') {
+      html += '<input type="text" value="' + escapeHtml(window._wdEditingConfig[f.key] || '') + '" oninput="wdCfgChange(\'' + f.key + '\', this.value)">';
+    } else if (f.type === 'textarea') {
+      html += '<textarea oninput="wdCfgChange(\'' + f.key + '\', this.value)">' + escapeHtml(window._wdEditingConfig[f.key] || '') + '</textarea>';
+    } else if (f.type === 'color') {
+      html += '<input type="color" value="' + (window._wdEditingConfig[f.key] || '#ffffff') + '" oninput="wdCfgChange(\'' + f.key + '\', this.value)" onchange="wdCfgChange(\'' + f.key + '\', this.value)">';
+     } else if (f.type === 'range') {
+      var v = window._wdEditingConfig[f.key] != null ? window._wdEditingConfig[f.key] : 1;
+      var isPx = !!f.isPx;
+      var showVal = isPx ? Math.round(v) : Math.round(v * 100);
+      var showUnit = isPx ? 'px' : '%';
+      html += '<div style="display:flex;align-items:center;gap:10px;">';
+      html += '<input type="range" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" value="' + v + '" oninput="wdCfgRangeChange(this, \'' + f.key + '\', ' + isPx + ')" style="flex:1;">';
+      html += '<span style="font-size:12px;color:var(--gray);width:44px;text-align:right;">' + showVal + showUnit + '</span>';
+      html += '</div>';
+    }else if (f.type === 'image') {
+      var preview = window._wdEditingConfig[f.key];
+      html += '<div class="wd-cfg-row">';
+      html += '<button class="wd-cfg-imgbtn" onclick="wdPickImage(\'' + f.key + '\')">' + (preview ? '更换图片' : '选择图片') + '</button>';
+      if (preview) html += '<button class="wd-cfg-clear" onclick="wdCfgChange(\'' + f.key + '\', null)">清除</button>';
+      html += '</div>';
+      if (preview) html += '<img src="' + preview + '" class="wd-cfg-imgpreview" style="margin-top:8px;">';
+    }
+    html += '</div>';
+  });
+
+  // 【新增】位置选择（仅新建时显示）
+  if (!window._wdEditingId) {
+    html += '<div class="wd-cfg-item">';
+    html += '<label class="wd-cfg-label">添加到的页（从第 1 页开始）</label>';
+    html += '<select id="wdPageSelect" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;outline:none;background:var(--card);color:var(--text);box-sizing:border-box;font-family:inherit;">';
+    html += '<option value="auto">自动找空位</option>';
+    var pTotal = state.appPages ? state.appPages.length : 3;
+    for (var pi = 0; pi < pTotal; pi++) {
+      html += '<option value="' + pi + '">第 ' + (pi + 1) + ' 页</option>';
+    }
+    html += '</select>';
+    html += '</div>';
+  }
+
+  area.innerHTML = html;
+}
+
+function wdCfgChange(key, val) {
+  if (!window._wdEditingConfig) return;
+  window._wdEditingConfig[key] = val;
+  renderWidgetPreview();
+  // 部分类型需要重绘表单（比如选了图片后要显示预览）
+  var meta = WIDGET_TYPES[window._wdEditingType];
+  if (meta) {
+    var f = meta.fields.find(function(x) { return x.key === key; });
+    if (f && f.type === 'image') renderWidgetEditForm();
+  }
+}
+
+function wdCfgRangeChange(el, key, isPx) {
+  var v = parseFloat(el.value);
+  wdCfgChange(key, v);
+  var display = el.nextElementSibling;
+  if (display) {
+    display.textContent = (isPx ? Math.round(v) : Math.round(v * 100)) + (isPx ? 'px' : '%');
+  }
+}
+
+function wdPickImage(key) {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var img = new Image();
+      img.onload = function() {
+        // 限制最大宽度，压缩
+        var canvas = document.createElement('canvas');
+        var MAX = 600;
+        var w = img.width, h = img.height;
+        if (w > h) { if (w > MAX) { h *= MAX / w; w = MAX; } }
+        else { if (h > MAX) { w *= MAX / h; h = MAX; } }
+        canvas.width = w; canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        wdCfgChange(key, canvas.toDataURL('image/jpeg', 0.8));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+// ===== 预览 =====
+function renderWidgetPreview() {
+  var area = document.getElementById('widgetPreviewArea');
+  if (!area) return;
+  var meta = WIDGET_TYPES[window._wdEditingType];
+  if (!meta) return;
+
+  var sizes = {
+    small: { w: 140, h: 140 },
+    medium: { w: 296, h: 140 },
+    large: { w: 296, h: 296 }
+  };
+  var s = sizes[meta.size] || sizes.small;
+
+  var innerHtml = renderWidgetInner(window._wdEditingType, window._wdEditingConfig);
+
+  var bgStyle = 'background-image:' +
+    'linear-gradient(45deg,#eaeaea 25%,transparent 25%),' +
+    'linear-gradient(-45deg,#eaeaea 25%,transparent 25%),' +
+    'linear-gradient(45deg,transparent 75%,#eaeaea 75%),' +
+    'linear-gradient(-45deg,transparent 75%,#eaeaea 75%);' +
+    'background-size:12px 12px;' +
+    'background-position:0 0,0 6px,6px -6px,-6px 0px;' +
+    'background-color:#fff;';
+
+  area.innerHTML =
+    '<div style="width:' + s.w + 'px;height:' + s.h + 'px;border-radius:20px;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,0.12);position:relative;' + bgStyle + '">' +
+    innerHtml +
+    '</div>';
+}
+
+// 每种组件的"内部渲染"函数（都是绝对定位，占满父容器）
+function renderWidgetInner(type, cfg) {
+  var bg = '';
+  var op = (cfg.bgOpacity != null) ? cfg.bgOpacity : 1;
+
+  // 透明度 > 0 时才渲染背景；=0 时什么都不画（露出下面的透明）
+  if (op > 0) {
+    if (cfg.bg) {
+      bg = '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:url(' + cfg.bg + ') center/cover no-repeat;opacity:' + op + ';pointer-events:none;"></div>';
+    } else if (cfg.bgColor) {
+      bg = '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:' + cfg.bgColor + ';opacity:' + op + ';pointer-events:none;"></div>';
+    }
+  }
+
+    if (type === 'cherry') {
+    var textColor = cfg.textColor || '#1d1d1f';
+    var cardColor = cfg.cardColor || '#ffffff';
+    var cardOp = (cfg.cardOpacity != null) ? cfg.cardOpacity : 0.95;
+    var bgBlur = cfg.bgBlur || 0;
+
+    var bgLayer = '';
+    if (op > 0) {
+      if (cfg.bg) {
+        bgLayer = '<div style="position:absolute;top:-10%;left:-10%;right:-10%;bottom:-10%;background:url(' + cfg.bg + ') center/cover no-repeat;opacity:' + op + ';filter:blur(' + bgBlur + 'px);pointer-events:none;"></div>';
+      } else if (cfg.bgColor) {
+        bgLayer = '<div style="position:absolute;inset:0;background:' + cfg.bgColor + ';opacity:' + op + ';pointer-events:none;"></div>';
+      }
+    }
+
+    var av1 = cfg.avatar1
+      ? 'background:url(' + cfg.avatar1 + ') center/cover no-repeat;'
+      : 'background:linear-gradient(135deg,#e8e0d0,#c8b8a8);';
+    var av2 = cfg.avatar2
+      ? 'background:url(' + cfg.avatar2 + ') center/cover no-repeat;'
+      : 'background:linear-gradient(135deg,#d8d0e0,#b8a8c8);';
+
+    // 底部卡片占下 45% 区域
+    return bgLayer +
+      '<div style="position:absolute;left:0;right:0;bottom:0;height:56%;background:' + cardColor + ';opacity:' + cardOp + ';border-radius:24px 24px 16px 16px;pointer-events:none;box-shadow:0 -4px 20px rgba(0,0,0,0.08);"></div>' +
+      '<div style="position:absolute;left:0;right:0;bottom:0;height:56%;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:0 14px 12px;box-sizing:border-box;">' +
+        // 头像行
+        '<div style="display:flex;justify-content:center;gap:18%;width:100%;margin-top:-38px;">' +
+          '<div style="width:68px;height:68px;border-radius:50%;' + av1 + 'border:3px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,0.15);box-sizing:border-box;flex-shrink:0;"></div>' +
+          '<div style="width:68px;height:68px;border-radius:50%;' + av2 + 'border:3px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,0.15);box-sizing:border-box;flex-shrink:0;"></div>' +
+        '</div>' +
+        // 名字行
+        '<div style="display:flex;justify-content:center;gap:18%;width:100%;margin-top:8px;">' +
+          '<div style="font-size:14px;font-weight:700;color:' + textColor + ';max-width:40%;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.name1 || '') + '</div>' +
+          '<div style="font-size:14px;font-weight:700;color:' + textColor + ';max-width:40%;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.name2 || '') + '</div>' +
+        '</div>' +
+        // 中间小字
+        '<div style="font-size:10px;color:' + textColor + ';opacity:0.7;text-align:center;margin-top:10px;line-height:1.4;padding:0 6px;box-sizing:border-box;max-width:100%;word-break:break-word;">' + escapeHtml(cfg.quote || '') + '</div>' +
+        // 定位
+        '<div style="font-size:11px;color:' + textColor + ';opacity:0.85;text-align:center;margin-top:auto;padding-top:6px;">' + escapeHtml(cfg.location || '') + '</div>' +
+      '</div>';
+  }
+
+    if (type === 'vinyl') {
+    var textColor = cfg.textColor || '#1d1d1f';
+    var cardColor = cfg.cardColor || '#d8dce0';
+    var cardOp = (cfg.cardOpacity != null) ? cfg.cardOpacity : 0.9;
+
+    function miniPic(src) {
+      if (src) {
+        return '<div style="width:100%;height:100%;background:url(' + src + ') center/cover no-repeat;border-radius:6px;"></div>';
+      }
+      return '<div style="width:100%;height:100%;background:linear-gradient(135deg,#c8ccd0,#a8b0b8);border-radius:6px;"></div>';
+    }
+
+    // 唱片中心
+    var discInner = cfg.discImg
+      ? '<div style="position:absolute;inset:14%;border-radius:50%;background:url(' + cfg.discImg + ') center/cover no-repeat;overflow:hidden;"></div>'
+      : '<div style="position:absolute;inset:14%;border-radius:50%;background:linear-gradient(135deg,#a8d8c8,#7ab8a0);overflow:hidden;"></div>';
+
+    return bg +
+      '<div style="position:absolute;inset:0;padding:10px;box-sizing:border-box;display:grid;grid-template-columns:1fr 2.2fr 1fr;grid-template-rows:1fr 1fr 1fr 1fr;gap:6px;">' +
+        // 左列 4 图
+        '<div style="grid-column:1;grid-row:1;">' + miniPic(cfg.img1) + '</div>' +
+        '<div style="grid-column:1;grid-row:2;">' + miniPic(cfg.img2) + '</div>' +
+        '<div style="grid-column:1;grid-row:3;">' + miniPic(cfg.img3) + '</div>' +
+        '<div style="grid-column:1;grid-row:4;">' + miniPic(cfg.img4) + '</div>' +
+        // 右列 4 图
+        '<div style="grid-column:3;grid-row:1;">' + miniPic(cfg.img5) + '</div>' +
+        '<div style="grid-column:3;grid-row:2;">' + miniPic(cfg.img6) + '</div>' +
+        '<div style="grid-column:3;grid-row:3;">' + miniPic(cfg.img7) + '</div>' +
+        '<div style="grid-column:3;grid-row:4;">' + miniPic(cfg.img8) + '</div>' +
+        // 中间黑胶
+        '<div style="grid-column:2;grid-row:1 / 3;position:relative;display:flex;align-items:center;justify-content:center;">' +
+          '<div style="width:80%;aspect-ratio:1/1;border-radius:50%;background:#1a1a1a;box-shadow:0 4px 16px rgba(0,0,0,0.3);position:relative;display:flex;align-items:center;justify-content:center;">' +
+            // 黑色圆盘纹路
+            '<div style="position:absolute;inset:6%;border-radius:50%;border:1px solid rgba(255,255,255,0.05);"></div>' +
+            '<div style="position:absolute;inset:12%;border-radius:50%;border:1px solid rgba(255,255,255,0.05);"></div>' +
+            // 封面
+            discInner +
+            // 中心孔
+            '<div style="position:absolute;width:8%;height:8%;background:#f0f0f0;border-radius:50%;"></div>' +
+            // 唱针（从右上伸出）
+            '<div style="position:absolute;top:-4%;right:6%;width:20%;height:2px;background:#aaa;transform:rotate(-45deg);transform-origin:right center;border-radius:2px;"></div>' +
+          '</div>' +
+        '</div>' +
+        // 中间文案卡片
+        '<div style="grid-column:2;grid-row:3 / 5;background:' + cardColor + ';opacity:' + cardOp + ';border-radius:14px;padding:10px 12px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:5px;overflow:hidden;">' +
+          '<div style="font-size:9px;color:' + textColor + ';opacity:0.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.text1 || '') + '</div>' +
+          '<div style="font-size:11px;font-weight:700;color:' + textColor + ';line-height:1.3;white-space:pre-wrap;overflow:hidden;">' + escapeHtml(cfg.text2 || '') + '</div>' +
+          '<div style="font-size:9px;color:' + textColor + ';opacity:0.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.text3 || '') + '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+    if (type === 'snowscape') {
+    var textColor = cfg.textColor || '#ffffff';
+    var bgBlur = cfg.bgBlur || 0;
+
+    var bgLayer = '';
+    if (op > 0) {
+      if (cfg.bg) {
+        bgLayer = '<div style="position:absolute;top:-10%;left:-10%;right:-10%;bottom:-10%;background:url(' + cfg.bg + ') center/cover no-repeat;opacity:' + op + ';filter:blur(' + bgBlur + 'px);pointer-events:none;"></div>';
+      } else if (cfg.bgColor) {
+        bgLayer = '<div style="position:absolute;inset:0;background:' + cfg.bgColor + ';opacity:' + op + ';pointer-events:none;"></div>';
+      }
+    }
+
+    // 拍立得（大的在后面）
+    var mainImgHtml = cfg.mainImg
+      ? '<div style="position:absolute;top:22px;left:42px;width:88px;height:108px;background:#fff;padding:5px 5px 24px;box-shadow:0 4px 14px rgba(0,0,0,0.2);transform:rotate(3deg);box-sizing:border-box;z-index:1;"><div style="width:100%;height:100%;background:url(' + cfg.mainImg + ') center/cover no-repeat;"></div></div>'
+      : '';
+
+    // 拍立得（小的在上面，压在大的上）
+    var polaroidHtml = cfg.polaroid
+      ? '<div style="position:absolute;top:28px;left:14px;width:76px;height:92px;background:#fff;padding:5px 5px 20px;box-shadow:0 3px 10px rgba(0,0,0,0.18);transform:rotate(-8deg);box-sizing:border-box;z-index:2;"><div style="width:100%;height:100%;background:url(' + cfg.polaroid + ') center/cover no-repeat;"></div></div>'
+      : '';
+
+    // 右上 Enjoy life 卡片
+    var enjoyCard = '<div style="position:absolute;top:12px;right:12px;width:42%;height:40%;background:rgba(255,255,255,0.18);border:1px solid rgba(255,255,255,0.35);border-radius:14px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:10px;box-sizing:border-box;text-align:center;">' +
+      '<div style="font-size:16px;color:' + textColor + ';font-style:italic;font-family:Georgia,serif;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.3);line-height:1.3;">' + escapeHtml(cfg.enjoyText || '') + '</div>' +
+    '</div>';
+
+    // 左下 Romance 卡片
+    var romanceCard = '<div style="position:absolute;bottom:16px;left:12px;width:42%;height:42%;background:rgba(255,255,255,0.18);border:1px solid rgba(255,255,255,0.35);border-radius:14px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 8px;box-sizing:border-box;text-align:center;gap:4px;">' +
+      '<div style="font-size:14px;color:' + textColor + ';font-style:italic;font-family:Georgia,serif;text-shadow:0 1px 3px rgba(0,0,0,0.3);">' + escapeHtml(cfg.romanceText || '') + '</div>' +
+      '<div style="font-size:12px;color:' + textColor + ';opacity:0.9;">♡</div>' +
+      '<div style="font-size:10px;color:' + textColor + ';font-style:italic;font-family:Georgia,serif;opacity:0.9;line-height:1.3;">' + escapeHtml(cfg.romanceSub || '') + '</div>' +
+    '</div>';
+
+    // 右下横图
+    var bottomImgHtml = '<div style="position:absolute;bottom:16px;right:12px;width:46%;">' +
+      '<div style="width:100%;aspect-ratio:16/9;background:#fff;padding:4px;box-shadow:0 3px 12px rgba(0,0,0,0.2);box-sizing:border-box;">' +
+        (cfg.bottomImg
+          ? '<div style="width:100%;height:100%;background:url(' + cfg.bottomImg + ') center/cover no-repeat;"></div>'
+          : '<div style="width:100%;height:100%;background:linear-gradient(135deg,#a8b8c8,#8a9aa8);"></div>') +
+      '</div>' +
+      '<div style="font-size:10px;color:' + textColor + ';font-style:italic;font-family:Georgia,serif;text-align:center;margin-top:4px;text-shadow:0 1px 3px rgba(0,0,0,0.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.bottomText || '') + '</div>' +
+    '</div>';
+
+    return bgLayer + mainImgHtml + polaroidHtml + enjoyCard + romanceCard + bottomImgHtml;
+  }
+
+
+    if (type === 'fourpics') {
+    var rad = (cfg.radius != null) ? cfg.radius : 10;
+
+    function picCell(imgSrc, text, barColor) {
+      var imgLayer = imgSrc
+        ? '<div style="position:absolute;inset:0;background:url(' + imgSrc + ') center/cover no-repeat;"></div>'
+        : '<div style="position:absolute;inset:0;background:linear-gradient(135deg,#e0e8d8,#c8dcc0);"></div>';
+      var bar = barColor || '#5a7a5a';
+      return '<div style="flex:1;border-radius:' + rad + 'px;overflow:hidden;position:relative;box-shadow:0 2px 6px rgba(0,0,0,0.08);">' +
+        imgLayer +
+        '<div style="position:absolute;left:6%;right:6%;bottom:6%;background:' + bar + ';border-radius:6px;padding:5px 4px;text-align:center;box-sizing:border-box;">' +
+          '<div style="font-size:8px;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(text || '') + '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    return bg +
+      '<div style="position:absolute;inset:0;padding:10px;box-sizing:border-box;display:flex;gap:6px;">' +
+        picCell(cfg.img1, cfg.text1, cfg.barColor1) +
+        picCell(cfg.img2, cfg.text2, cfg.barColor2) +
+        picCell(cfg.img3, cfg.text3, cfg.barColor3) +
+        picCell(cfg.img4, cfg.text4, cfg.barColor4) +
+      '</div>';
+  }
+
+  if (type === 'annicard') {
+    var textColor = cfg.textColor || '#ffffff';
+    var cardOp = (cfg.cardOpacity != null) ? cfg.cardOpacity : 0.35;
+
+    // 计算天数（过去用"天"，未来用"还剩N天"）
+    function calcDays(dateStr) {
+      if (!dateStr) return null;
+      var d = new Date(dateStr);
+      if (isNaN(d.getTime())) return null;
+      var now = new Date();
+      d.setHours(0,0,0,0);
+      now.setHours(0,0,0,0);
+      return Math.round((now - d) / 86400000);
+    }
+
+    var days1 = calcDays(cfg.date1);
+    var days2 = calcDays(cfg.date2);
+    var days3 = calcDays(cfg.date3);
+
+    // 顶部主纪念日
+    var mainDays = days1 != null ? days1 : 0;
+
+    // 左右两个小纪念日
+    function smallLine(title, days) {
+      var txt = '';
+      if (days == null) txt = '';
+      else if (days >= 0) txt = days + ' 天';
+      else txt = '还有 ' + Math.abs(days) + ' 天';
+      return '<div style="display:flex;align-items:center;gap:4px;font-size:9px;color:' + textColor + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+        '<span style="width:5px;height:5px;border-radius:50%;background:' + textColor + ';flex-shrink:0;"></span>' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(title || '') + ' ' + txt + '</span>' +
+      '</div>';
+    }
+
+    return bg +
+      '<div style="position:absolute;inset:0;padding:12px 14px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;">' +
+        // 主纪念日卡片
+        '<div style="background:rgba(50,70,100,' + cardOp + ');border-radius:14px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;">' +
+          '<div style="font-size:11px;color:' + textColor + ';font-weight:500;letter-spacing:1px;line-height:1.4;max-width:50%;">' + escapeHtml(cfg.title1 || '') + '</div>' +
+          '<div style="display:flex;align-items:baseline;gap:4px;">' +
+            '<span style="font-size:36px;font-weight:400;color:' + textColor + ';line-height:1;letter-spacing:-1px;font-family:Georgia,serif;">' + mainDays + '</span>' +
+            '<span style="font-size:11px;color:' + textColor + ';opacity:0.9;">天了</span>' +
+          '</div>' +
+        '</div>' +
+        // 底部两个小纪念日
+        '<div style="display:flex;justify-content:space-between;gap:10px;">' +
+          '<div style="flex:1;min-width:0;">' + smallLine(cfg.title2, days2) + '</div>' +
+          '<div style="flex:1;min-width:0;">' + smallLine(cfg.title3, days3) + '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (type === 'musiccard') {
+    var textColor = cfg.textColor || '#ffffff';
+    var barColor = cfg.barColor || '#ffffff';
+
+    var coverLayer = cfg.cover
+      ? '<div style="width:44px;height:44px;border-radius:10px;background:url(' + cfg.cover + ') center/cover no-repeat;flex-shrink:0;box-shadow:0 3px 10px rgba(0,0,0,0.2);"></div>'
+      : '<div style="width:44px;height:44px;border-radius:10px;background:rgba(255,255,255,0.3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">🎵</div>';
+
+    return bg +
+      '<div style="position:absolute;inset:0;padding:12px 16px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;">' +
+        // 顶部：封面 + 文字
+        '<div style="display:flex;align-items:center;gap:12px;">' +
+          coverLayer +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:14px;color:' + textColor + ';font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.3px;">' + escapeHtml(cfg.songName || '') + '</div>' +
+            '<div style="font-size:11px;color:' + textColor + ';opacity:0.75;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.artistName || '') + '</div>' +
+          '</div>' +
+        '</div>' +
+        // 中间：进度条
+        '<div style="height:3px;background:rgba(255,255,255,0.25);border-radius:2px;overflow:hidden;margin:8px 0;">' +
+          '<div style="width:45%;height:100%;background:' + barColor + ';border-radius:2px;"></div>' +
+        '</div>' +
+        // 底部：控制按钮
+        '<div style="display:flex;justify-content:space-between;align-items:center;color:' + textColor + ';font-size:16px;padding:0 8px;">' +
+          '<span style="opacity:0.85;">☆</span>' +
+          '<span>⏮</span>' +
+          '<span style="font-size:20px;">⏸</span>' +
+          '<span>⏭</span>' +
+          '<span style="opacity:0.85;">◉</span>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (type === 'glassy') {
+    var tempColor = cfg.tempColor || '#b8a99a';
+    var textColor = cfg.textColor || '#b8a99a';
+
+    var now = new Date();
+    var y = now.getFullYear();
+    var mm = String(now.getMonth() + 1).padStart(2, '0');
+    var dd = String(now.getDate()).padStart(2, '0');
+    var wdArr = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var wdStr = wdArr[now.getDay()];
+    var dateStr = y + '.' + mm + '.' + dd + '   ' + wdStr;
+
+    // 用 24 小时时间段模拟温度（早上低，下午高，晚上低）
+    var h = now.getHours();
+    var temp = 18 + Math.round(5 * Math.sin((h - 6) / 24 * Math.PI * 2));
+
+    var imgLayer = '';
+    if (cfg.img) {
+      imgLayer = '<div style="position:absolute;top:12px;right:14px;bottom:12px;width:40%;background:url(' + cfg.img + ') center/cover no-repeat;border-radius:12px;pointer-events:none;"></div>';
+    }
+
+    return bg + imgLayer +
+      '<div style="position:absolute;inset:0;padding:14px 16px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:8px;">' +
+        '<div style="display:flex;align-items:flex-start;gap:12px;max-width:60%;">' +
+          '<div style="font-size:46px;font-weight:300;color:' + tempColor + ';line-height:1;letter-spacing:-2px;font-family:Georgia,serif;">' +
+            temp + '<span style="font-size:22px;vertical-align:top;margin-left:-2px;">°</span>' +
+          '</div>' +
+          '<div style="flex:1;padding-top:8px;min-width:0;">' +
+            '<div style="font-size:9px;color:' + textColor + ';font-weight:600;white-space:nowrap;letter-spacing:0.5px;">' + dateStr + '</div>' +
+            '<div style="font-size:9px;color:' + textColor + ';margin-top:5px;white-space:nowrap;">📶 Wifi: <span style="margin-left:4px;font-weight:600;">ON</span></div>' +
+            '<div style="font-size:9px;color:' + textColor + ';margin-top:2px;white-space:nowrap;">ᛒ Bluetooth: <span style="margin-left:4px;font-weight:600;">OFF</span></div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="background:rgba(200,180,150,0.4);padding:5px 10px;border-radius:4px;font-size:10px;color:' + textColor + ';font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%;box-sizing:border-box;">× ' + escapeHtml(cfg.caption1 || '') + '</div>' +
+        '<div style="background:rgba(90,85,75,0.7);padding:5px 10px;border-radius:4px;font-size:10px;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%;box-sizing:border-box;">▶→ ' + escapeHtml(cfg.caption2 || '') + '</div>' +
+      '</div>';
+  }
+
+
+    if (type === 'anniversary') {
+    var cardColor = cfg.cardColor || '#ffd1dc';
+    var cardOp = (cfg.cardOpacity != null) ? cfg.cardOpacity : 0.6;
+    var textColor = cfg.textColor || '#ffffff';
+    var eventName = cfg.eventName || '';
+
+    // 计算天数
+    var days = 0;
+    if (cfg.targetDate) {
+      var td = new Date(cfg.targetDate);
+      if (!isNaN(td.getTime())) {
+        var now = new Date();
+        td.setHours(0,0,0,0);
+        now.setHours(0,0,0,0);
+        days = Math.floor((now - td) / 86400000);
+      }
+    }
+
+    // 顶部卡片背景
+    var cardBgStyle = 'background:' + cardColor + ';opacity:' + cardOp + ';';
+    if (cfg.cardBg) {
+      cardBgStyle = 'background:url(' + cfg.cardBg + ') center/cover no-repeat;opacity:' + cardOp + ';';
+    }
+
+    // 图片
+    var img1 = cfg.img1 ? '<img src="' + cfg.img1 + '" style="width:100%;height:100%;object-fit:cover;display:block;">' : '<div style="width:100%;height:100%;background:#f0f0f0;"></div>';
+    var img2 = cfg.img2 ? '<img src="' + cfg.img2 + '" style="width:100%;height:100%;object-fit:cover;display:block;">' : '<div style="width:100%;height:100%;background:#f0f0f0;"></div>';
+
+    return bg +
+      '<div style="position:absolute;inset:0;padding:10px;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">' +
+        // 顶部卡片（含文字层）
+        '<div style="flex:1;min-height:0;border-radius:12px;position:relative;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">' +
+          '<div style="position:absolute;inset:0;' + cardBgStyle + '"></div>' +
+          '<div style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 6px;box-sizing:border-box;">' +
+            '<div style="font-size:10px;color:' + textColor + ';font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-shadow:0 1px 2px rgba(0,0,0,0.15);margin-bottom:2px;">' + escapeHtml(eventName) + '</div>' +
+            '<div style="display:flex;align-items:baseline;gap:2px;">' +
+              '<span style="font-size:22px;font-weight:700;color:' + textColor + ';text-shadow:0 1px 3px rgba(0,0,0,0.2);line-height:1;">' + days + '</span>' +
+              '<span style="font-size:10px;color:' + textColor + ';opacity:0.9;text-shadow:0 1px 2px rgba(0,0,0,0.2);">天</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        // 下方两张图
+        '<div style="flex:1;min-height:0;display:flex;gap:6px;">' +
+          '<div style="flex:1;border-radius:10px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.06);">' + img1 + '</div>' +
+          '<div style="flex:1;border-radius:10px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.06);">' + img2 + '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (type === 'japanese') {
+    var titleColor = cfg.titleColor || '#a8c8e0';
+    var bubbleColor = cfg.bubbleColor || '#ffffff';
+    var bubbleOp = (cfg.bubbleOpacity != null) ? cfg.bubbleOpacity : 0.6;
+    var textColor = cfg.textColor || '#8fa8bf';
+
+    var av1Style = cfg.avatar1 ? 'background-image:url(' + cfg.avatar1 + ');background-size:cover;background-position:center;' : 'background:#d0e0ec;';
+    var av2Style = cfg.avatar2 ? 'background-image:url(' + cfg.avatar2 + ');background-size:cover;background-position:center;' : 'background:#d0e0ec;';
+
+    var bubbleStyle = 'display:flex;align-items:center;background:rgba(' + hexToRgb(bubbleColor) + ',' + bubbleOp + ');border-radius:20px;padding:6px 10px;font-size:9px;color:' + textColor + ';box-shadow:0 1px 3px rgba(0,0,0,0.04);box-sizing:border-box;';
+
+    return bg +
+      '<div style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:10px 8px;box-sizing:border-box;gap:10px;">' +
+        // 顶部标题
+        '<div style="text-align:center;font-size:10px;font-weight:600;color:' + titleColor + ';letter-spacing:2px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.title || '') + '</div>' +
+        // 第 1 行（左头像 + 气泡）
+        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
+          '<div style="width:26px;height:26px;border-radius:50%;' + av1Style + 'border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.08);flex-shrink:0;"></div>' +
+          '<div style="' + bubbleStyle + 'flex:1;min-width:0;justify-content:center;">' +
+            '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.msg1 || '') + '</span>' +
+          '</div>' +
+        '</div>' +
+        // 第 2 行（气泡 + 右头像）
+        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
+          '<div style="' + bubbleStyle + 'flex:1;min-width:0;justify-content:center;">' +
+            '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.msg2 || '') + '</span>' +
+          '</div>' +
+          '<div style="width:26px;height:26px;border-radius:50%;' + av2Style + 'border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.08);flex-shrink:0;"></div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (type === 'chat') {
+    var b1 = cfg.bubble1Color || '#ffffff';
+    var b2 = cfg.bubble2Color || '#a8d8e8';
+    var t1 = cfg.textColor1 || '#333333';
+    var t2 = cfg.textColor2 || '#1d1d1f';
+
+    var bubbleStyle = 'max-width:75%;padding:5px 10px;border-radius:12px;font-size:9px;line-height:1.4;word-break:break-word;box-shadow:0 1px 3px rgba(0,0,0,0.06);box-sizing:border-box;';
+
+    return bg +
+      '<div style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:10px 8px;box-sizing:border-box;">' +
+        // 左气泡
+        '<div style="display:flex;justify-content:flex-start;">' +
+          '<div style="' + bubbleStyle + 'background:' + b1 + ';color:' + t1 + ';border-bottom-left-radius:4px;">' + escapeHtml(cfg.msg1 || '') + '</div>' +
+        '</div>' +
+        // 右气泡
+        '<div style="display:flex;justify-content:flex-end;">' +
+          '<div style="' + bubbleStyle + 'background:' + b2 + ';color:' + t2 + ';border-bottom-right-radius:4px;">' + escapeHtml(cfg.msg2 || '') + '</div>' +
+        '</div>' +
+        // 左气泡
+        '<div style="display:flex;justify-content:flex-start;">' +
+          '<div style="' + bubbleStyle + 'background:' + b1 + ';color:' + t1 + ';border-bottom-left-radius:4px;">' + escapeHtml(cfg.msg3 || '') + '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+
+  if (type === 'summerwave') {
+    var bgBlur = cfg.bgBlur || 0;
+    var innerSrc = cfg.innerImg;
+    var textColor = cfg.textColor || '#ffffff';
+    var textSize = cfg.textSize || 16;
+
+    // 外层背景（带模糊）
+    var bgLayer = '';
+    if (op > 0) {
+      if (cfg.bg) {
+        bgLayer = '<div style="position:absolute;top:-10%;left:-10%;right:-10%;bottom:-10%;background:url(' + cfg.bg + ') center/cover no-repeat;opacity:' + op + ';filter:blur(' + bgBlur + 'px);pointer-events:none;"></div>';
+      } else if (cfg.bgColor) {
+        bgLayer = '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:' + cfg.bgColor + ';opacity:' + op + ';pointer-events:none;"></div>';
+      }
+    }
+
+    // 内层图片（带白色描边）
+    var innerLayer = '';
+    if (innerSrc) {
+      innerLayer = '<div style="position:absolute;top:8%;left:8%;right:8%;bottom:32%;border-radius:12px;overflow:hidden;border:3px solid rgba(255,255,255,0.6);box-shadow:0 4px 14px rgba(0,0,0,0.15);box-sizing:border-box;">' +
+        '<img src="' + innerSrc + '" style="width:100%;height:100%;object-fit:cover;display:block;">' +
+        '</div>';
+    }
+
+    // 底部文字
+    return bgLayer + innerLayer +
+      '<div style="position:absolute;left:0;right:0;bottom:7%;text-align:center;padding:0 8%;box-sizing:border-box;">' +
+        '<div style="font-size:' + textSize + 'px;color:' + textColor + ';font-weight:500;letter-spacing:1px;text-shadow:0 1px 4px rgba(0,0,0,0.35);font-family:Georgia,serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cfg.text || '') + '</div>' +
+      '</div>';
+  }
+
+  if (type === 'couple' || type === 'coupleL') {
+    var sc = (type === 'coupleL') ? 2 : 1;
+    var a1 = cfg.avatar1 ? 'background-image:url(' + cfg.avatar1 + ');background-size:cover;background-position:center;' : 'background:linear-gradient(135deg,#f0f0f5,#e0e0e8);';
+    var a2 = cfg.avatar2 ? 'background-image:url(' + cfg.avatar2 + ');background-size:cover;background-position:center;' : 'background:linear-gradient(135deg,#f0f0f5,#e0e0e8);';
+    var cardOp = (cfg.cardOpacity != null) ? cfg.cardOpacity : 0.6;
+    var cardColor = cfg.cardColor || '#ffffff';
+
+    return bg +
+      '<div style="position:absolute;inset:0;display:flex;flex-direction:column;padding:' + (6*sc) + 'px ' + (8*sc) + 'px;box-sizing:border-box;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-shrink:0;">' +
+          '<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;padding:0 ' + (2*sc) + 'px;">' +
+            '<div style="font-size:' + (9*sc) + 'px;background:#fff;color:#333;padding:' + (2*sc) + 'px ' + (8*sc) + 'px;border-radius:' + (8*sc) + 'px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;box-shadow:0 1px 3px rgba(0,0,0,0.1);box-sizing:border-box;">' + escapeHtml(cfg.bubble1 || '') + '</div>' +
+            '<div style="width:' + (40*sc) + 'px;height:' + (40*sc) + 'px;border-radius:50%;margin-top:' + (3*sc) + 'px;' + a1 + 'border:' + (2*sc) + 'px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.12);box-sizing:border-box;flex-shrink:0;"></div>' +
+          '</div>' +
+          '<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;padding:0 ' + (2*sc) + 'px;">' +
+            '<div style="font-size:' + (9*sc) + 'px;background:#fff;color:#333;padding:' + (2*sc) + 'px ' + (8*sc) + 'px;border-radius:' + (8*sc) + 'px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;box-shadow:0 1px 3px rgba(0,0,0,0.1);box-sizing:border-box;">' + escapeHtml(cfg.bubble2 || '') + '</div>' +
+            '<div style="width:' + (40*sc) + 'px;height:' + (40*sc) + 'px;border-radius:50%;margin-top:' + (3*sc) + 'px;' + a2 + 'border:' + (2*sc) + 'px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.12);box-sizing:border-box;flex-shrink:0;"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="font-size:' + (8*sc) + 'px;color:rgba(40,40,60,0.6);text-align:center;line-height:1.35;padding:' + (6*sc) + 'px ' + (4*sc) + 'px ' + (4*sc) + 'px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;">' + escapeHtml(cfg.quote || '') + '</div>' +
+        '<div style="flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;background:' + cardColor + ';opacity:' + cardOp + ';border-radius:' + (8*sc) + 'px;padding:' + (6*sc) + 'px ' + (8*sc) + 'px;box-shadow:0 2px 6px rgba(0,0,0,0.08);box-sizing:border-box;">' +
+          '<div style="font-size:' + (9*sc) + 'px;color:#333;text-align:center;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:' + (4*sc) + 'px;">' + escapeHtml(cfg.songName || '') + '</div>' +
+          '<div style="height:' + (2*sc) + 'px;background:rgba(0,0,0,0.12);border-radius:1px;overflow:hidden;margin-bottom:' + (4*sc) + 'px;"><div style="width:60%;height:100%;background:#666;border-radius:1px;"></div></div>' +
+          '<div style="display:flex;justify-content:space-around;font-size:' + (11*sc) + 'px;color:#555;line-height:1;">' +
+            '<span>★</span><span>⏮</span><span>⏸</span><span>⏭</span><span>♥</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (type === 'battery') {
+    var lvl = 69;
+    var circumference = 2 * Math.PI * 26;
+    var offset = circumference * (1 - lvl / 100);
+    var color = cfg.color || '#ff8fb1';
+    var textColor = cfg.textColor || '#1d1d1f';
+    var phoneColor = cfg.phoneColor || '#333333';
+    return bg +
+      '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;">' +
+        '<div style="position:relative;width:64px;height:64px;">' +
+          '<svg width="64" height="64" viewBox="0 0 64 64" style="position:absolute;inset:0;transform:rotate(-90deg);">' +
+            '<circle cx="32" cy="32" r="26" stroke="rgba(0,0,0,0.08)" stroke-width="6" fill="none"/>' +
+            '<circle cx="32" cy="32" r="26" stroke="' + color + '" stroke-width="6" fill="none" ' +
+              'stroke-dasharray="' + circumference + '" stroke-dashoffset="' + offset + '" stroke-linecap="round"/>' +
+          '</svg>' +
+          '<svg width="64" height="64" viewBox="0 0 64 64" style="position:absolute;inset:0;">' +
+            '<rect x="24" y="19" width="16" height="26" rx="2.5" stroke="' + phoneColor + '" stroke-width="2" fill="none"/>' +
+            '<line x1="29" y1="41" x2="35" y2="41" stroke="' + phoneColor + '" stroke-width="2" stroke-linecap="round"/>' +
+          '</svg>' +
+        '</div>' +
+        '<div style="font-size:22px;font-weight:700;color:' + textColor + ';letter-spacing:0.5px;">' + lvl + '%</div>' +
+      '</div>';
+  }
+
+  return bg + '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#999;">（未实现）</div>';
+}
+
+function openWidgetFromHome(widgetId) {
+  var w = state.widgets.find(function(x) { return x.id === widgetId; });
+  if (!w) return;
+  var meta = WIDGET_TYPES[w.type];
+  if (!meta) return;
+  window._wdEditingType = w.type;
+  window._wdEditingId = widgetId;
+  window._wdEditingConfig = JSON.parse(JSON.stringify(w.config));
+
+  document.getElementById('widgetEditTitle').textContent = '编辑 ' + meta.name;
+  renderWidgetEditForm();
+  renderWidgetPreview();
+  navigateTo('pageWidgetEdit');
+}
+
+// 检查某个区域是否为空（排除指定 widget）
+function isAreaFreeExcept(page, row, col, spanCol, spanRow, excludeWidgetId) {
+  var pageKeys = state.appPages[page] || [];
+  for (var r = row; r < row + spanRow; r++) {
+    for (var c = col; c < col + spanCol; c++) {
+      var slotIdx = r * 4 + c;
+      if (pageKeys[slotIdx]) return false;
+    }
+  }
+  for (var i = 0; i < state.widgets.length; i++) {
+    var w = state.widgets[i];
+    if (w.id === excludeWidgetId) continue;
+    if (w.page !== page) continue;
+    if (row < w.row + w.rowSpan && row + spanRow > w.row &&
+        col < w.col + w.colSpan && col + spanCol > w.col) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ===== 保存 =====
+function saveWidget() {
+  initWidgetData();
+  var meta = WIDGET_TYPES[window._wdEditingType];
+  if (!meta) return;
+
+  // ===== 编辑已有组件 =====
+  if (window._wdEditingId) {
+    var old = state.widgets.find(function(x) { return x.id === window._wdEditingId; });
+    if (old) {
+      old.config = JSON.parse(JSON.stringify(window._wdEditingConfig));
+      saveState();
+      showToast('已更新');
+      window._wdEditingId = null;
+      navigateTo('pageHome');
+      renderAppIcons();
+      return;
+    }
+  }
+
+  // 新建
+  var w = { w: meta.size === 'small' ? 2 : 4, h: meta.size === 'small' ? 2 : (meta.size === 'medium' ? 2 : 4) };
+
+  // 检查用户是否指定页
+  var selEl = document.getElementById('wdPageSelect');
+  var selVal = selEl ? selEl.value : 'auto';
+  var pos = null;
+
+  if (selVal !== 'auto') {
+    var targetPage = parseInt(selVal);
+    // 在指定页找空位
+    for (var r = 0; r <= 6 - w.h; r++) {
+      for (var c = 0; c <= 4 - w.w; c++) {
+        if (isAreaFree(targetPage, r, c, w.w, w.h)) {
+          pos = { page: targetPage, row: r, col: c };
+          break;
+        }
+      }
+      if (pos) break;
+    }
+    if (!pos) { showToast('第 ' + (targetPage + 1) + ' 页没有足够空位'); return; }
+  } else {
+    pos = findFreeSlot(w.w, w.h);
+    if (!pos) { showToast('主屏幕没有足够的空位'); return; }
+  }
+
+  var widget = {
+    id: 'wd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    type: window._wdEditingType,
+    size: meta.size,
+    page: pos.page,
+    row: pos.row,
+    col: pos.col,
+    rowSpan: w.h,
+    colSpan: w.w,
+    config: JSON.parse(JSON.stringify(window._wdEditingConfig))
+  };
+  state.widgets.push(widget);
+  saveState();
+
+  showToast('已添加到主屏幕第 ' + (pos.page + 1) + ' 页');
+  navigateTo('pageHome');
+  renderAppIcons();
+}
+
+// 在 pages × 24 格里找空位
+// 页 = 4 列 × 6 行
+function findFreeSlot(spanCol, spanRow) {
+  var pages = state.appPages ? state.appPages.length : 3;
+  for (var p = 0; p < pages; p++) {
+    for (var r = 0; r <= 6 - spanRow; r++) {
+      for (var c = 0; c <= 4 - spanCol; c++) {
+        if (isAreaFree(p, r, c, spanCol, spanRow)) {
+          return { page: p, row: r, col: c };
+        }
+      }
+    }
+  }
+  // 没空位 → 自动加新页
+  var newPage = [];
+  for (var z = 0; z < APP_PER_PAGE; z++) newPage.push(null);
+  state.appPages.push(newPage);
+  saveState();
+  return { page: state.appPages.length - 1, row: 0, col: 0 };
+}
+
+function isAreaFree(page, row, col, spanCol, spanRow) {
+  // 检查是否和已有图标冲突
+  var pageKeys = state.appPages[page] || [];
+  for (var r = row; r < row + spanRow; r++) {
+    for (var c = col; c < col + spanCol; c++) {
+      var slotIdx = r * 4 + c;
+      if (pageKeys[slotIdx]) return false; // 有图标
+    }
+  }
+  // 检查是否和其他 widget 冲突
+  for (var i = 0; i < state.widgets.length; i++) {
+    var w = state.widgets[i];
+    if (w.page !== page) continue;
+    if (row < w.row + w.rowSpan && row + spanRow > w.row &&
+        col < w.col + w.colSpan && col + spanCol > w.col) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function hexToRgb(hex) {
+  if (!hex) return '255,255,255';
+  hex = hex.replace('#', '');
+  if (hex.length === 3) {
+    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  }
+  var r = parseInt(hex.substr(0, 2), 16) || 0;
+  var g = parseInt(hex.substr(2, 2), 16) || 0;
+  var b = parseInt(hex.substr(4, 2), 16) || 0;
+  return r + ',' + g + ',' + b;
+}
+
+// ===== 已添加的组件页面 =====
+window._awEditMode = false;
+window._awSelected = [];
+
+function openAddedWidgets() {
+  window._awEditMode = false;
+  window._awSelected = [];
+  renderAddedWidgets();
+  navigateTo('pageAddedWidgets');
+}
+
+function toggleAddedWidgetsEdit() {
+  window._awEditMode = !window._awEditMode;
+  if (!window._awEditMode) window._awSelected = [];
+  renderAddedWidgets();
+}
+
+function renderAddedWidgets() {
+  var list = document.getElementById('addedWidgetsList');
+  var btn = document.getElementById('addedWidgetsEditBtn');
+  if (!list) return;
+
+  if (btn) {
+    btn.textContent = window._awEditMode ? '完成' : '编辑';
+    btn.style.color = window._awEditMode ? 'var(--red)' : 'var(--blue)';
+  }
+
+  initWidgetData();
+
+  if (state.widgets.length === 0) {
+    list.innerHTML = '<div style="padding:60px 20px;text-align:center;color:var(--gray);font-size:13px;">还没有添加任何组件</div>';
+    return;
+  }
+
+  // 按页分组
+  var byPage = {};
+  state.widgets.forEach(function(w) {
+    if (!byPage[w.page]) byPage[w.page] = [];
+    byPage[w.page].push(w);
+  });
+
+  var html = '';
+  Object.keys(byPage).sort(function(a, b) { return a - b; }).forEach(function(pageNum) {
+    html += '<div style="font-size:13px;color:var(--gray);margin:14px 4px 8px;">第 ' + (parseInt(pageNum) + 1) + ' 页</div>';
+    byPage[pageNum].forEach(function(w) {
+      var meta = WIDGET_TYPES[w.type];
+      var name = meta ? meta.name : '未知组件';
+      var selected = window._awSelected.indexOf(w.id) > -1;
+      var clickAction = window._awEditMode
+        ? 'toggleAwSelect(\'' + w.id + '\')'
+        : '';
+      html += '<div onclick="' + clickAction + '" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--card);border:1px solid ' + (selected ? 'var(--blue)' : 'var(--border)') + ';border-radius:12px;margin-bottom:8px;' + (window._awEditMode ? 'cursor:pointer;' : '') + (selected ? 'background:rgba(0,122,255,0.06);' : '') + '">';
+      if (window._awEditMode) {
+        html += '<div style="width:22px;height:22px;border-radius:50%;border:2px solid var(--blue);background:' + (selected ? 'var(--blue)' : '#fff') + ';color:#fff;font-size:12px;line-height:20px;text-align:center;flex-shrink:0;box-sizing:border-box;">' + (selected ? '✓' : '') + '</div>';
+      }
+      html += '<div style="flex:1;min-width:0;">';
+      html += '<div style="font-size:14px;font-weight:600;color:var(--text);">' + name + '</div>';
+      html += '<div style="font-size:11px;color:var(--gray);margin-top:3px;">位置：第 ' + (w.row + 1) + ' 行 · 第 ' + (w.col + 1) + ' 列 · 占 ' + w.colSpan + '×' + w.rowSpan + '</div>';
+      html += '</div>';
+      html += '</div>';
+    });
+  });
+
+  // 底部操作栏
+  if (window._awEditMode) {
+    html += '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(255,255,255,0.96);border-top:1px solid var(--border);padding:10px 16px 16px;box-sizing:border-box;display:flex;gap:10px;z-index:30;">';
+    html += '<button onclick="awSelectAll()" style="flex:1;padding:10px;border-radius:10px;font-size:14px;font-weight:500;border:1px solid #e5e5ea;background:#fff;color:#1d1d1f;cursor:pointer;">全选</button>';
+    html += '<button onclick="awDeleteSelected()" style="flex:1;padding:10px;border-radius:10px;font-size:14px;font-weight:500;border:none;background:rgba(255,59,48,0.9);color:#fff;cursor:pointer;">删除</button>';
+    html += '<button onclick="toggleAddedWidgetsEdit()" style="flex:1;padding:10px;border-radius:10px;font-size:14px;font-weight:500;border:1px solid #e5e5ea;background:#fff;color:#1d1d1f;cursor:pointer;">取消</button>';
+    html += '</div>';
+  }
+
+  list.innerHTML = html;
+}
+
+function toggleAwSelect(id) {
+  var idx = window._awSelected.indexOf(id);
+  if (idx > -1) window._awSelected.splice(idx, 1);
+  else window._awSelected.push(id);
+  renderAddedWidgets();
+}
+
+function awSelectAll() {
+  initWidgetData();
+  if (window._awSelected.length === state.widgets.length) {
+    window._awSelected = [];
+  } else {
+    window._awSelected = state.widgets.map(function(w) { return w.id; });
+  }
+  renderAddedWidgets();
+}
+
+function awDeleteSelected() {
+  if (window._awSelected.length === 0) {
+    showToast('请先选择要删除的组件');
+    return;
+  }
+  var count = window._awSelected.length;
+  var ids = window._awSelected.slice();
+
+  // 不用 confirm（部分浏览器/WebView 会静默拦截），直接删
+  state.widgets = state.widgets.filter(function(w) {
+    return ids.indexOf(w.id) === -1;
+  });
+  window._awSelected = [];
+  saveState();
+  renderAddedWidgets();
+  try { renderAppIcons(); } catch(e) {}
+  showToast('已删除 ' + count + ' 个组件');
+}
+
+// ===== Widget 拖动逻辑 =====
+window._wdDragState = null;
+window._wdPressTimer = null;
+window._wdPressTarget = null;
+window._wdPressStartX = 0;
+window._wdPressStartY = 0;
+
+function onWdgPressStart(e, widgetEl) {
+  var widgetId = widgetEl.dataset.widgetId;
+  if (!widgetId) return;
+  var t = e.touches && e.touches[0] ? e.touches[0] : e;
+  window._wdPressStartX = t.clientX;
+  window._wdPressStartY = t.clientY;
+  window._wdPressTarget = widgetEl;
+
+  clearTimeout(window._wdPressTimer);
+  window._wdPressTimer = setTimeout(function() {
+    if (!window._wdPressTarget) return;
+    if (!window.appEditMode) enterAppEditMode();
+
+    // 创建 ghost
+    var el = window._wdPressTarget;
+    var rect = el.getBoundingClientRect();
+    var ghost = el.cloneNode(true);
+    ghost.classList.add('app-drag-ghost');
+    ghost.style.width = el.offsetWidth + 'px';
+    ghost.style.height = el.offsetHeight + 'px';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    ghost._offsetX = window._wdPressStartX - rect.left;
+    ghost._offsetY = window._wdPressStartY - rect.top;
+    document.body.appendChild(ghost);
+
+    el.classList.add('dragging');
+    el.style.opacity = '0.3';
+
+    window._wdDragState = {
+      widgetId: widgetId,
+      ghost: ghost,
+      el: el
+    };
+    if (navigator.vibrate) navigator.vibrate(30);
+  }, 500);
+}
+
+function onWdgPressMove(e) {
+  if (!window._wdPressTarget && !window._wdDragState) return;
+  var t = e.touches && e.touches[0] ? e.touches[0] : e;
+
+  // 还没到长按触发时间 → 检查是否移动过多（取消长按）
+  if (!window._wdDragState) {
+    var dx = t.clientX - window._wdPressStartX;
+    var dy = t.clientY - window._wdPressStartY;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+      clearTimeout(window._wdPressTimer);
+      window._wdPressTarget = null;
+    }
+    return;
+  }
+
+  // 拖动中
+  e.preventDefault();
+  var s = window._wdDragState;
+  s.ghost.style.left = (t.clientX - s.ghost._offsetX) + 'px';
+  s.ghost.style.top = (t.clientY - s.ghost._offsetY) + 'px';
+
+  // 边缘翻页
+  var container = document.getElementById('homeSwiper');
+  if (container) {
+    var rect = container.getBoundingClientRect();
+    if (t.clientX < rect.left + 60) container.scrollLeft -= 12;
+    else if (t.clientX > rect.right - 60) container.scrollLeft += 12;
+  }
+}
+
+function onWdgPressEnd(e) {
+  clearTimeout(window._wdPressTimer);
+
+  if (!window._wdDragState) {
+    window._wdPressTarget = null;
+    return;
+  }
+
+  var t = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
+  var s = window._wdDragState;
+  var w = state.widgets.find(function(x) { return x.id === s.widgetId; });
+
+  if (w && s.ghost) {
+    var ghostLeft = parseFloat(s.ghost.style.left) || 0;
+    var ghostTop = parseFloat(s.ghost.style.top) || 0;
+    var drop = calcWidgetDropPos(ghostLeft, ghostTop, w);
+    if (drop && isAreaFreeExcept(drop.page, drop.row, drop.col, w.colSpan, w.rowSpan, w.id)) {
+      w.page = drop.page;
+      w.row = drop.row;
+      w.col = drop.col;
+      saveState();
+    } else if (drop) {
+      showToast('这里放不下');
+    }
+  }
+
+  if (s.ghost) s.ghost.remove();
+  if (s.el) {
+    s.el.classList.remove('dragging');
+    s.el.style.opacity = '';
+  }
+  window._wdDragState = null;
+  window._wdPressTarget = null;
+  window._wdPressStartX = 0;
+  window._wdPressStartY = 0;
+
+  renderAppIcons();
+  if (window.appEditMode) {
+    document.querySelectorAll('.app-grid').forEach(function(g) { g.classList.add('editing'); });
+    document.querySelectorAll('.home-widget').forEach(function(el) { el.classList.add('editing'); });
+  }
+}
+
+function calcWidgetDropPos(ghostLeft, ghostTop, w) {
+  var container = document.getElementById('homeSwiper');
+  if (!container) return null;
+  var containerRect = container.getBoundingClientRect();
+  var pageW = container.offsetWidth;
+  if (!pageW) return null;
+
+  // ghost 左上角相对 container 可见区域
+  var visX = ghostLeft - containerRect.left;
+  var visY = ghostTop - containerRect.top;
+
+  // 转成内容坐标（含跨页偏移）
+  var contentX = visX + container.scrollLeft;
+
+  // 哪一页
+  var pageIdx = Math.floor(contentX / pageW);
+  if (pageIdx < 0) pageIdx = 0;
+  if (pageIdx >= state.appPages.length) pageIdx = state.appPages.length - 1;
+
+  var xInPage = contentX - pageIdx * pageW;
+
+  var grid = container.querySelector('.app-grid[data-page-index="' + pageIdx + '"]');
+  if (!grid) return null;
+  var cs = window.getComputedStyle(grid);
+  var padLeft = parseFloat(cs.paddingLeft) || 16;
+  var padTop = parseFloat(cs.paddingTop) || 24;
+  var gapX = parseFloat(cs.columnGap) || 12;
+  var gapY = parseFloat(cs.rowGap) || 20;
+  var gridW = grid.clientWidth || 390;
+  var cellW = (gridW - padLeft * 2 - gapX * 3) / 4;
+  var cellH = 82;
+
+  // 吸附到最近的格子
+  var col = Math.round((xInPage - padLeft) / (cellW + gapX));
+  var row = Math.round((visY - padTop) / (cellH + gapY));
+
+  if (col < 0) col = 0;
+  if (row < 0) row = 0;
+  if (col + w.colSpan > 4) col = 4 - w.colSpan;
+  if (row + w.rowSpan > 6) row = 6 - w.rowSpan;
+
+  return { page: pageIdx, row: row, col: col };
 }
