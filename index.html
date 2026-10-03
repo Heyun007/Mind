@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <title>Mind</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
   <link rel="stylesheet" href="style.css">
 <style id="userCustomStyle"></style>
 <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
@@ -180,6 +182,10 @@
             <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">🛠️</div>
             <div style="font-size:11px;color:var(--gray);">小助手</div>
           </div>
+                    <div onclick="openChoicePanel()" style="cursor:pointer;">
+            <div style="width:50px;height:50px;margin:0 auto 6px;background:#f0f0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;">⚖️</div>
+            <div style="font-size:11px;color:var(--gray);">抉择</div>
+          </div>
         </div>
         <input type="file" id="imageMessageInput" accept="image/*" style="display:none" onchange="sendImageMessage(event)">
       </div>
@@ -326,14 +332,19 @@
       </select>
     </div>
         <div class="form-group" style="margin-top:16px;">
-      <label>梦角状态（显示在聊天列表和聊天页名字右边）</label>
-      <div id="dreamStatusList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="newStatusInput" placeholder="输入状态，回车添加"
-               onkeydown="if(event.key==='Enter'){event.preventDefault();addDreamStatus();}"
-               style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;outline:none;background:var(--card);color:var(--text);">
-        <button type="button" onclick="batchAddDreamStatus()"
-                style="padding:10px 14px;border:1px dashed var(--border);border-radius:10px;background:transparent;color:var(--blue);font-size:13px;cursor:pointer;">批量</button>
+      <div onclick="toggleDreamStatusCollapse()" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
+        <label style="margin:0;cursor:pointer;">梦角状态（<span id="dreamStatusCount">0</span> 条）</label>
+        <span id="dreamStatusArrow" style="font-size:12px;color:var(--gray);transition:transform 0.2s;">▼</span>
+      </div>
+      <div id="dreamStatusBody" style="display:none;margin-top:10px;">
+        <div id="dreamStatusList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="newStatusInput" placeholder="输入状态，回车添加"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();addDreamStatus();}"
+                 style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;outline:none;background:var(--card);color:var(--text);">
+          <button type="button" onclick="batchAddDreamStatus()"
+                  style="padding:10px 14px;border:1px dashed var(--border);border-radius:10px;background:transparent;color:var(--blue);font-size:13px;cursor:pointer;">批量</button>
+        </div>
       </div>
     </div>
     <button class="btn-primary" onclick="saveDreamRole()">保存</button>
@@ -581,6 +592,212 @@
   </div>
 </div>
   
+<!-- ===== PAGE: Dream Recall ===== -->
+<div class="page" id="pageDreamRecall">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>梦境回忆</h2>
+    <button onclick="openDreamHistory()" style="width:32px;height:32px;border:none;background:transparent;font-size:20px;cursor:pointer;color:#e0e8f5;display:flex;align-items:center;justify-content:center;">📜</button>
+  </div>
+  <div class="page-body" style="padding:0;background:#0a1628;">
+    <div class="dream-recall-page">
+      <div class="dr-avatars" id="drAvatarList"></div>
+      <div class="dr-main" id="drMain"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Dream History ===== -->
+<div class="page" id="pageDreamHistory">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageDreamRecall')">‹</button>
+    <h2>回忆记录</h2>
+    <button onclick="toggleDreamHistoryEdit()" id="drHistoryEditBtn" style="padding:6px 14px;border:none;background:rgba(255,255,255,0.08);border-radius:14px;font-size:13px;cursor:pointer;color:#e0e8f5;">编辑</button>
+  </div>
+  <div class="page-body" style="padding:0;background:#0a1628;position:relative;">
+    <div id="drHistoryList" style="padding:12px 16px;"></div>
+    <div id="drHistoryActionBar" style="position:sticky;bottom:0;left:0;width:100%;background:rgba(10,22,40,0.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.08);padding:12px 16px;box-sizing:border-box;display:none;gap:10px;">
+      <button onclick="drHistorySelectAll()" style="flex:1;padding:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#e0e8f5;border-radius:12px;font-size:14px;cursor:pointer;">全选</button>
+      <button onclick="drHistoryDeleteSelected()" style="flex:1;padding:10px;border:none;background:rgba(255,59,48,0.75);color:#fff;border-radius:12px;font-size:14px;cursor:pointer;">删除</button>
+      <button onclick="exitDreamHistoryEdit()" style="flex:1;padding:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#e0e8f5;border-radius:12px;font-size:14px;cursor:pointer;">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Quiz ===== -->
+<div class="page" id="pageQuiz">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>问卷</h2>
+  </div>
+  <div style="display:flex;background:var(--card);border-bottom:1px solid var(--border);flex-shrink:0;">
+    <div onclick="switchQuizTab('dream')" id="quizTabDream" style="flex:1;text-align:center;padding:12px;font-size:14px;font-weight:600;color:var(--blue);border-bottom:2px solid var(--blue);cursor:pointer;">梦角提问</div>
+    <div onclick="switchQuizTab('me')" id="quizTabMe" style="flex:1;text-align:center;padding:12px;font-size:14px;font-weight:600;color:var(--gray);border-bottom:2px solid transparent;cursor:pointer;">我提问</div>
+    <div onclick="switchQuizTab('history')" id="quizTabHistory" style="flex:1;text-align:center;padding:12px;font-size:14px;font-weight:600;color:var(--gray);border-bottom:2px solid transparent;cursor:pointer;">历史记录</div>
+  </div>
+  <div class="page-body" style="padding:0;position:relative;">
+    <div id="quizTabContent"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Quiz History Detail ===== -->
+<div class="page" id="pageQuizHistoryDetail">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageQuiz')">‹</button>
+    <h2>问卷详情</h2>
+  </div>
+  <div class="page-body" id="quizHistoryDetailBody"></div>
+</div>
+
+<!-- ===== PAGE: Memo List ===== -->
+<div class="page" id="pageMemoList">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>备忘录</h2>
+    <button onclick="openMemoEdit(null)" style="width:32px;height:32px;border:none;background:transparent;font-size:22px;cursor:pointer;color:var(--blue);display:flex;align-items:center;justify-content:center;">+</button>
+  </div>
+  <div class="page-body" style="padding:0;">
+    <div id="memoListContainer" style="padding:12px 16px;"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Memo Edit ===== -->
+<div class="page" id="pageMemoEdit">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageMemoList')">‹</button>
+    <h2 id="memoEditTitle">新建备忘录</h2>
+    <button onclick="saveMemo()" style="padding:6px 14px;border:none;background:var(--blue);color:#fff;border-radius:14px;font-size:13px;font-weight:600;cursor:pointer;">完成</button>
+  </div>
+  <div class="page-body">
+    <div class="form-group">
+      <label>内容</label>
+      <textarea id="memoContentInput" placeholder="写点什么…" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:12px;font-size:15px;outline:none;resize:vertical;min-height:140px;background:var(--card);color:var(--text);font-family:inherit;box-sizing:border-box;"></textarea>
+    </div>
+
+    <div class="setting-item" style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="si-left">
+        <span class="si-label">设置提醒</span>
+        <span class="si-desc">到时间梦角会提醒你</span>
+      </div>
+      <div class="setting-toggle" id="memoRemindToggle">
+        <div class="toggle-knob"></div>
+      </div>
+    </div>
+
+    <div id="memoRemindSetting" style="display:none;">
+      <div class="form-group">
+        <label>提醒日期</label>
+        <input type="date" id="memoDateInput" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:12px;font-size:15px;outline:none;background:var(--card);color:var(--text);box-sizing:border-box;">
+      </div>
+
+      <div class="form-group">
+        <label>提醒时间</label>
+        <input type="time" id="memoTimeInput" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:12px;font-size:15px;outline:none;background:var(--card);color:var(--text);box-sizing:border-box;">
+      </div>
+
+      <div class="form-group">
+        <label>提醒角色（可多选）</label>
+        <div id="memoDreamList" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 备忘录卡片详情弹窗 ===== -->
+<div id="memoDetailModal" class="quiz-modal-overlay">
+  <div class="quiz-modal">
+    <div class="quiz-modal-header">
+      <span class="quiz-modal-title">备忘录提醒</span>
+      <span class="quiz-modal-close" onclick="closeMemoDetailModal()">×</span>
+    </div>
+    <div class="quiz-modal-body" id="memoDetailBody"></div>
+    <div class="quiz-modal-footer" style="display:flex;gap:10px;">
+      <button onclick="memoDetailLater()" style="flex:1;padding:12px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">稍后提醒</button>
+      <button onclick="memoDetailDone()" style="flex:1;padding:12px;border:none;background:#007aff;color:#fff;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;">已完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 抉择设置弹窗 ===== -->
+<div id="choiceModal" class="quiz-modal-overlay">
+  <div class="quiz-modal">
+    <div class="quiz-modal-header">
+      <span class="quiz-modal-title">抉择</span>
+      <span class="quiz-modal-close" onclick="closeChoiceModal()">×</span>
+    </div>
+    <div class="quiz-modal-body">
+      <div class="quiz-q-block">
+        <div class="quiz-q-title">问题</div>
+        <input type="text" id="choiceQuestionInput" placeholder="想让 TA 选什么？" style="width:100%;padding:10px 12px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;box-sizing:border-box;outline:none;">
+      </div>
+      <div class="quiz-q-block">
+        <div class="quiz-q-title">选项（至少 2 个，最多 10 个）</div>
+        <div id="choiceOptionsContainer"></div>
+        <button onclick="addChoiceOption()" style="width:100%;padding:8px;border:1px dashed #e5e5ea;background:transparent;border-radius:10px;color:#007aff;font-size:13px;cursor:pointer;margin-top:4px;">+ 添加选项</button>
+      </div>
+    </div>
+    <div class="quiz-modal-footer" style="display:flex;gap:8px;">
+      <button onclick="closeChoiceModal()" style="flex:1;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">取消</button>
+      <button onclick="sendChoice()" style="flex:1;padding:11px;border:none;background:#007aff;color:#fff;border-radius:12px;font-size:14px;cursor:pointer;font-weight:600;">发送</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Widget Library ===== -->
+<div class="page" id="pageWidgets">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>小组件</h2>
+    <button onclick="openAddedWidgets()" style="padding:6px 12px;border:none;background:transparent;font-size:13px;cursor:pointer;color:var(--blue);">已添加</button>
+  </div>
+  <div style="display:flex;background:var(--card);border-bottom:1px solid var(--border);flex-shrink:0;">
+    <div onclick="switchWidgetTab('small')" id="wdTabSmall" style="flex:1;text-align:center;padding:12px;font-size:14px;font-weight:600;color:var(--blue);border-bottom:2px solid var(--blue);cursor:pointer;">小号 2×2</div>
+    <div onclick="switchWidgetTab('medium')" id="wdTabMedium" style="flex:1;text-align:center;padding:12px;font-size:14px;font-weight:600;color:var(--gray);border-bottom:2px solid transparent;cursor:pointer;">中号 4×2</div>
+    <div onclick="switchWidgetTab('large')" id="wdTabLarge" style="flex:1;text-align:center;padding:12px;font-size:14px;font-weight:600;color:var(--gray);border-bottom:2px solid transparent;cursor:pointer;">大号 4×4</div>
+  </div>
+  <div class="page-body" style="padding:14px 16px;">
+    <div id="widgetLibContent"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Widget Edit ===== -->
+<div class="page" id="pageWidgetEdit">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageWidgets')">‹</button>
+    <h2 id="widgetEditTitle">编辑小组件</h2>
+  </div>
+  <div class="page-body" style="padding:14px 16px 90px;">
+    <div id="widgetPreviewArea" style="display:flex;justify-content:center;margin-bottom:20px;"></div>
+    <div id="widgetConfigArea"></div>
+    <button onclick="saveWidget()" style="position:absolute;bottom:20px;left:16px;right:16px;padding:14px;border:none;background:var(--blue);color:#fff;border-radius:14px;font-size:15px;font-weight:600;cursor:pointer;">保存并添加到主屏幕</button>
+  </div>
+</div>
+
+<!-- ===== PAGE: Added Widgets ===== -->
+<div class="page" id="pageAddedWidgets">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageWidgets')">‹</button>
+    <h2>已添加的组件</h2>
+    <button onclick="toggleAddedWidgetsEdit()" id="addedWidgetsEditBtn" style="padding:6px 14px;border:none;background:transparent;font-size:14px;cursor:pointer;color:var(--blue);">编辑</button>
+  </div>
+  <div class="page-body" style="padding:12px 16px 80px;">
+    <div id="addedWidgetsList"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: Avatar Library ===== -->
+<div class="page" id="pageAvatar">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigateTo('pageHome')">‹</button>
+    <h2>头像库</h2>
+    <button onclick="toggleAvatarEdit()" id="avatarEditBtn" style="padding:6px 12px;border:none;background:transparent;font-size:13px;cursor:pointer;color:var(--blue);margin-right:4px;">编辑</button>
+    <button onclick="openAvatarImport()" style="width:32px;height:32px;border:none;background:transparent;font-size:22px;cursor:pointer;color:var(--blue);display:flex;align-items:center;justify-content:center;">+</button>
+  </div>
+  <div class="page-body" style="padding:12px 16px;">
+    <div id="avatarLibGrid" class="avatar-lib-grid"></div>
+  </div>
+</div>
+
 <!-- ===== PAGE: Favorites ===== -->
 <div class="page" id="pageFavorites">
   <div class="page-header">
@@ -1108,6 +1325,96 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
+
+<!-- ===== 问卷：添加问题弹窗 ===== -->
+<div id="quizAddModal" class="quiz-modal-overlay">
+  <div class="quiz-modal">
+    <div class="quiz-modal-header">
+      <span class="quiz-modal-title">添加问题</span>
+      <span class="quiz-modal-close" onclick="closeQuizAddModal()">×</span>
+    </div>
+    <div class="quiz-modal-body">
+      <div style="display:flex;gap:6px;margin-bottom:14px;">
+        <button id="quizAddTabSingle" onclick="switchQuizAddTab('single')" style="flex:1;padding:8px;border:none;border-radius:10px;font-size:13px;cursor:pointer;background:#007aff;color:#fff;">单条</button>
+        <button id="quizAddTabBatch" onclick="switchQuizAddTab('batch')" style="flex:1;padding:8px;border:none;border-radius:10px;font-size:13px;cursor:pointer;background:#f0f0f5;color:#555;">批量</button>
+      </div>
+      <input type="text" id="quizAddSingleInput" placeholder="输入问题" onkeydown="if(event.key==='Enter')confirmQuizAdd()" style="width:100%;padding:10px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;box-sizing:border-box;outline:none;">
+      <textarea id="quizAddBatchInput" placeholder="每行一个问题&#10;自动去除重复问题" style="display:none;width:100%;padding:10px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;box-sizing:border-box;outline:none;min-height:140px;resize:vertical;font-family:inherit;"></textarea>
+    </div>
+    <div class="quiz-modal-footer" style="display:flex;gap:8px;">
+      <button onclick="closeQuizAddModal()" style="flex:1;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">取消</button>
+      <button onclick="confirmQuizAdd()" style="flex:1;padding:11px;border:none;background:#007aff;color:#fff;border-radius:12px;font-size:14px;cursor:pointer;">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 问卷：作答弹窗（用户答梦角的提问） ===== -->
+<div id="quizAnswerModal" class="quiz-modal-overlay">
+  <div class="quiz-modal">
+    <div class="quiz-modal-header">
+      <span class="quiz-modal-title">填写问卷</span>
+      <span class="quiz-modal-close" onclick="closeQuizAnswerModal()">×</span>
+    </div>
+    <div class="quiz-modal-body" id="quizAnswerBody"></div>
+    <div class="quiz-modal-footer">
+      <button onclick="submitQuizAnswer()" style="width:100%;padding:12px;border:none;background:#007aff;color:#fff;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;">发送</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 问卷：查看已答问卷详情 ===== -->
+<div id="quizViewModal" class="quiz-modal-overlay">
+  <div class="quiz-modal">
+    <div class="quiz-modal-header">
+      <span class="quiz-modal-title">问卷详情</span>
+      <span class="quiz-modal-close" onclick="closeQuizViewModal()">×</span>
+    </div>
+    <div class="quiz-modal-body" id="quizViewBody"></div>
+  </div>
+</div>
+
+<!-- ===== 问卷：我提问 - 添加题目弹窗 ===== -->
+<div id="quizMeAddModal" class="quiz-modal-overlay">
+  <div class="quiz-modal">
+    <div class="quiz-modal-header">
+      <span class="quiz-modal-title">添加题目</span>
+      <span class="quiz-modal-close" onclick="closeQuizMeAddModal()">×</span>
+    </div>
+    <div class="quiz-modal-body">
+      <div class="quiz-q-block">
+        <div class="quiz-q-title">题目内容</div>
+        <input type="text" id="quizMeQInput" placeholder="输入问题" style="width:100%;padding:10px 12px;border:1px solid #e5e5ea;border-radius:10px;font-size:14px;box-sizing:border-box;outline:none;">
+      </div>
+      <div class="quiz-q-block">
+        <div class="quiz-q-title">题型</div>
+        <div style="display:flex;gap:6px;">
+          <button id="quizMeTypeSingle" onclick="switchQuizMeType('single')" style="flex:1;padding:8px;border:none;border-radius:10px;font-size:13px;cursor:pointer;background:#007aff;color:#fff;">单选</button>
+          <button id="quizMeTypeMulti" onclick="switchQuizMeType('multi')" style="flex:1;padding:8px;border:none;border-radius:10px;font-size:13px;cursor:pointer;background:#f0f0f5;color:#555;">多选</button>
+        </div>
+      </div>
+      <div class="quiz-q-block">
+        <div class="quiz-q-title">选项（至少 2 个，最多 10 个）</div>
+        <div id="quizMeOptionsContainer"></div>
+        <button onclick="addQuizMeOption()" style="width:100%;padding:8px;border:1px dashed #e5e5ea;background:transparent;border-radius:10px;color:#007aff;font-size:13px;cursor:pointer;margin-top:4px;">+ 添加选项</button>
+      </div>
+    </div>
+    <div class="quiz-modal-footer" style="display:flex;gap:8px;">
+      <button onclick="closeQuizMeAddModal()" style="flex:1;padding:11px;border:1px solid #e5e5ea;background:transparent;border-radius:12px;font-size:14px;cursor:pointer;color:#1d1d1f;">取消</button>
+      <button onclick="confirmQuizMeAdd()" style="flex:1;padding:11px;border:none;background:#007aff;color:#fff;border-radius:12px;font-size:14px;cursor:pointer;">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 问卷：发送给梦角 - 选人弹窗 ===== -->
+<div id="quizSendModal" class="quiz-modal-overlay">
+  <div class="quiz-modal">
+    <div class="quiz-modal-header">
+      <span class="quiz-modal-title">发送给…</span>
+      <span class="quiz-modal-close" onclick="closeQuizSendModal()">×</span>
+    </div>
+    <div class="quiz-modal-body" id="quizSendBody"></div>
+  </div>
+</div>
 
   <!-- 首次进入欢迎面板 -->
 <div id="welcomeOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.45); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:9999; justify-content:center; align-items:center; padding:20px;">
