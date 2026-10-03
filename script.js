@@ -1203,22 +1203,28 @@ if (data.stickerGroups && Array.isArray(data.stickerGroups)) {
   stickerGroups = [{ id: 'default', name: '默认', items: data.stickers }];
   saveStickerGroups();
 }
+            // 容错写 localStorage（容量满时静默跳过，不影响 state 恢复）
+      function safeSet(key, val) {
+        if (val === null || val === undefined) return;
+        try { localStorage.setItem(key, val); } catch(e) { console.warn('localStorage 满，跳过 ' + key); }
+      }
+
       // 恢复私聊聊天背景
       if (data.dreamChatBg) {
-        localStorage.setItem('dreamChatBg', data.dreamChatBg);
+        safeSet('dreamChatBg', data.dreamChatBg);
       } else if (data.dreamChatBg === null && data.version >= 2) {
-        localStorage.removeItem('dreamChatBg');
+        try { localStorage.removeItem('dreamChatBg'); } catch(e) {}
       }
       // 恢复聊天设置
       if (data.dreamChatSettings) {
-        localStorage.setItem('dreamChatSettings', data.dreamChatSettings);
+        safeSet('dreamChatSettings', data.dreamChatSettings);
       }
       // 恢复陪伴设置
-      if (data.comp_bg) localStorage.setItem('comp_bg', data.comp_bg);
-      if (data.comp_color) localStorage.setItem('comp_color', data.comp_color);
-      if (data.comp_fontsize) localStorage.setItem('comp_fontsize', data.comp_fontsize);
-      if (data.comp_bgblur) localStorage.setItem('comp_bgblur', data.comp_bgblur);
-      if (data.comp_avatar) localStorage.setItem('comp_avatar', data.comp_avatar);
+      if (data.comp_bg) safeSet('comp_bg', data.comp_bg);
+      if (data.comp_color) safeSet('comp_color', data.comp_color);
+      if (data.comp_fontsize) safeSet('comp_fontsize', data.comp_fontsize);
+      if (data.comp_bgblur) safeSet('comp_bgblur', data.comp_bgblur);
+      if (data.comp_avatar) safeSet('comp_avatar', data.comp_avatar);
 
       saveState();
       if (typeof renderAll === 'function') renderAll();
