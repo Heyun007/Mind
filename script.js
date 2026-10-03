@@ -2159,14 +2159,18 @@ function renderChat() {
     bg = localStorage.getItem('dreamChatBg');
   }
 
-  if (chatBody) {
+    // 背景图挂到整页，让顶部栏也能透出背景
+  var pageEl = document.getElementById('pagePrivateChat');
+  if (pageEl) {
     if (bg) {
-      chatBody.style.background = 'url("' + bg + '") center/cover no-repeat';
-      chatBody.style.backgroundColor = 'transparent';
+      pageEl.style.background = 'url("' + bg + '") center/cover no-repeat';
     } else {
-      chatBody.style.background = '';
-      chatBody.style.backgroundColor = '';
+      pageEl.style.background = '';
     }
+  }
+  if (chatBody) {
+    chatBody.style.background = 'transparent';
+    chatBody.style.backgroundColor = 'transparent';
   }
 
   if (isGroup) {
