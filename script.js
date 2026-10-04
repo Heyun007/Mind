@@ -287,17 +287,17 @@ state.appPages.forEach(function(pageKeys, pageIdx) {
     if (!pageEl) return;
     pageEl.style.position = 'relative';
 
-    // 【核心修复】：让每一行的高度 = 列宽，格子是正方形
-    var pw0 = pageEl.getBoundingClientRect().width;
-    if (!pw0 || pw0 < 100) pw0 = window.innerWidth;
+      // 【vivo 兼容】：优先用 window.innerWidth，getBoundingClientRect 在旧 WebView 里可能是 0
+    var pw0 = window.innerWidth;
+    if (!pw0 || pw0 < 100) pw0 = document.documentElement.clientWidth;
     if (!pw0 || pw0 < 100) pw0 = 390;
     var cellW0 = (pw0 - 32 - 12 * 3) / 4;
     pageEl.style.gridAutoRows = cellW0 + 'px';
-
+  
     state.widgets.forEach(function(w) {
       if (w.page !== pageIdx) return;
-      var pw = pageEl.getBoundingClientRect().width;
-      if (!pw || pw < 100) pw = window.innerWidth;
+          var pw = window.innerWidth;
+      if (!pw || pw < 100) pw = document.documentElement.clientWidth;
       if (!pw || pw < 100) pw = 390;
       var cellW = (pw - 32 - 12 * 3) / 4;
       var cellH = cellW;
@@ -12744,7 +12744,9 @@ function calcWidgetDropPos(ghostLeft, ghostTop, w) {
   var padTop = parseFloat(cs.paddingTop) || 24;
   var gapX = parseFloat(cs.columnGap) || 12;
   var gapY = parseFloat(cs.rowGap) || 20;
-  var gridW = grid.clientWidth || 390;
+  var gridW = window.innerWidth;
+  if (!gridW || gridW < 100) gridW = document.documentElement.clientWidth;
+  if (!gridW || gridW < 100) gridW = 390;
   var cellW = (gridW - padLeft * 2 - gapX * 3) / 4;
   var cellH = 82;
 
