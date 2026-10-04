@@ -373,6 +373,9 @@
         <button class="btn-primary" onclick="document.getElementById('importCardInput').click()" style="flex:1;">选择 JSON 文件导入</button>
         <input type="file" id="importCardInput" accept=".json" style="display:none" onchange="handleImportCards(event)">
       </div>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn-secondary" onclick="exportCards()" style="flex:1;">导出字卡为 JSON</button>
+      </div>
     </div>
   </div>
 </div>
@@ -999,6 +1002,13 @@
         <span class="si-label">后台消息推送</span>
         <span class="si-desc">接收梦角的消息通知</span>
       </div>
+          <div class="setting-item" onclick="clearAllData()" style="border:1px solid var(--red);">
+      <div class="si-left">
+        <span class="si-label" style="color:var(--red);">清除所有数据</span>
+        <span class="si-desc">恢复初始状态，不可撤销</span>
+      </div>
+      <div class="si-right" style="color:var(--red);">›</div>
+    </div>
       <div class="setting-toggle" id="pushToggle">
         <div class="toggle-knob"></div>
       </div>
