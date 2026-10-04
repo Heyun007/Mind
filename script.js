@@ -433,8 +433,15 @@ setInterval(checkAutoLetter, 3 * 60 * 60 * 1000);
   initAvatarData();
   checkAvatarRandomChange();
   setInterval(checkAvatarRandomChange, 5 * 60 * 1000);
-  updateAppIconBadges();
+   updateAppIconBadges();
   setInterval(updateAppIconBadges, 15000);
+
+  // WebView 加载时宽度是渐变的，多次重渲染保证小组件正确
+  [200, 600, 1500, 3000, 5000, 8000].forEach(function(d) {
+    setTimeout(function() {
+      try { renderAppIcons(); } catch(e) {}
+    }, d);
+  });
 
     // 小组件加载时机容错（防止 WebView 加载时错位）
   [100, 300, 800, 1500, 3000].forEach(function(delay) {
