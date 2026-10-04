@@ -1376,10 +1376,11 @@ button[onclick="sendChatMsg()"] {
 .widget-lib-cell:active { transform: scale(0.97); }
 .widget-lib-preview {
   width: 100%;
-  aspect-ratio: 1 / 1;
+  height: 0;
+  padding-bottom: 100%;
+  position: relative;
   border-radius: 18px;
   overflow: hidden;
-  position: relative;
   box-shadow: 0 4px 14px rgba(0,0,0,0.08);
   background-image:
     linear-gradient(45deg, #eaeaea 25%, transparent 25%),
@@ -1389,6 +1390,15 @@ button[onclick="sendChatMsg()"] {
   background-size: 12px 12px;
   background-position: 0 0, 0 6px, 6px -6px, -6px 0px;
   background-color: #fff;
+}
+.widget-lib-preview.medium { padding-bottom: 50%; }
+.widget-lib-preview.large { padding-bottom: 100%; }
+.widget-lib-preview-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 .widget-lib-preview.medium { aspect-ratio: 2 / 1; }
 .widget-lib-preview-inner {
