@@ -289,11 +289,12 @@ function renderAppIcons() {
 
     state.widgets.forEach(function(w) {
       if (w.page !== pageIdx) return;
-      var pw = pageEl.clientWidth;
-      if (!pw) pw = pageEl.parentNode ? pageEl.parentNode.clientWidth : 390;
-      if (!pw) pw = 390;
+      var pw = pageEl.getBoundingClientRect().width;
+      if (!pw || pw < 100) pw = window.innerWidth;
+      if (!pw || pw < 100) pw = 390;
+      var _minCellW = 40;
       var cellW = (pw - 32 - 12 * 3) / 4;
-      var cellH = 82;
+      var cellH = cellW;
       var gapX = 12, gapY = 20, padL = 16, padT = 24;
 
       var wEl = document.createElement('div');
@@ -428,6 +429,13 @@ setInterval(checkAutoLetter, 3 * 60 * 60 * 1000);
   setInterval(checkAvatarRandomChange, 5 * 60 * 1000);
   updateAppIconBadges();
   setInterval(updateAppIconBadges, 15000);
+
+    // 小组件加载时机容错（防止 WebView 加载时错位）
+  [100, 300, 800, 1500, 3000].forEach(function(delay) {
+    setTimeout(function() {
+      try { renderAppIcons(); } catch(e) {}
+    }, delay);
+  });
 
   // 注册 Service Worker（PWA）
   if ('serviceWorker' in navigator) {
@@ -12238,11 +12246,9 @@ function renderWidgetInner(type, cfg) {
     }
 
     // 内层图片（带白色描边）
-    var innerLayer = '';
+        var innerLayer = '';
     if (innerSrc) {
-      innerLayer = '<div style="position:absolute;top:8%;left:8%;right:8%;bottom:32%;border-radius:12px;overflow:hidden;border:3px solid rgba(255,255,255,0.6);box-shadow:0 4px 14px rgba(0,0,0,0.15);box-sizing:border-box;">' +
-        '<img src="' + innerSrc + '" style="width:100%;height:100%;object-fit:cover;display:block;">' +
-        '</div>';
+      innerLayer = '<div style="position:absolute;top:8%;left:8%;right:8%;bottom:32%;border-radius:12px;overflow:hidden;border:3px solid rgba(255,255,255,0.6);box-shadow:0 4px 14px rgba(0,0,0,0.15);box-sizing:border-box;background:url(' + innerSrc + ') center/cover no-repeat;"></div>';
     }
 
     // 底部文字
