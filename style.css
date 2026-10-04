@@ -1374,6 +1374,7 @@ button[onclick="sendChatMsg()"] {
   cursor: pointer;
 }
 .widget-lib-cell:active { transform: scale(0.97); }
+
 .widget-lib-preview {
   width: 100%;
   height: 0;
@@ -1400,11 +1401,7 @@ button[onclick="sendChatMsg()"] {
   right: 0;
   bottom: 0;
 }
-.widget-lib-preview.medium { aspect-ratio: 2 / 1; }
-.widget-lib-preview-inner {
-  position: absolute;
-  inset: 0;
-}
+
 .widget-lib-name {
   font-size: 12px;
   color: var(--text);
@@ -1513,14 +1510,14 @@ button[onclick="sendChatMsg()"] {
 
 /* 小点永远在最上层，不被小组件盖住 */
 #homePager {
+  position: relative;
+  z-index: 200;
+}
 
-  /* 聊天页顶部栏毛玻璃 */
+/* 聊天页顶部栏毛玻璃 */
 #pagePrivateChat .page-header {
   background: rgba(255,255,255,0.55) !important;
   backdrop-filter: blur(20px) !important;
   -webkit-backdrop-filter: blur(20px) !important;
   border-bottom: 1px solid rgba(255,255,255,0.3) !important;
-}
-  position: relative;
-  z-index: 200;
 }
