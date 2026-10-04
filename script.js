@@ -282,17 +282,23 @@ function renderAppIcons() {
   }
 
   // 渲染每一页里的小组件（绝对定位覆盖在网格上）
-  state.appPages.forEach(function(pageKeys, pageIdx) {
+state.appPages.forEach(function(pageKeys, pageIdx) {
     var pageEl = container.querySelector('.app-grid[data-page-index="' + pageIdx + '"]');
     if (!pageEl) return;
     pageEl.style.position = 'relative';
+
+    // 【核心修复】：让每一行的高度 = 列宽，格子是正方形
+    var pw0 = pageEl.getBoundingClientRect().width;
+    if (!pw0 || pw0 < 100) pw0 = window.innerWidth;
+    if (!pw0 || pw0 < 100) pw0 = 390;
+    var cellW0 = (pw0 - 32 - 12 * 3) / 4;
+    pageEl.style.gridAutoRows = cellW0 + 'px';
 
     state.widgets.forEach(function(w) {
       if (w.page !== pageIdx) return;
       var pw = pageEl.getBoundingClientRect().width;
       if (!pw || pw < 100) pw = window.innerWidth;
       if (!pw || pw < 100) pw = 390;
-      var _minCellW = 40;
       var cellW = (pw - 32 - 12 * 3) / 4;
       var cellH = cellW;
       var gapX = 12, gapY = 20, padL = 16, padT = 24;
