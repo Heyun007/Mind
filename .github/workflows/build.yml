@@ -16,12 +16,6 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
-        run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
-
       - name: Create Android project
         run: |
           mkdir -p app/src/main/java/com/heyun007/mind
