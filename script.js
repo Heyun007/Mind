@@ -5709,7 +5709,10 @@ function compInit(){
         s.textContent='#pageCompanion .companion-page::before{background-image:url('+u+')!important;opacity:1!important}';
         document.head.appendChild(s);
         page.classList.add('has-bg');
-        localStorage.setItem('comp_bg',u);
+        if (!state.settings) state.settings = {};
+        state.settings.comp_bg = u;
+        saveState();
+        try { localStorage.setItem('comp_bg', u); } catch(e) {}
       };
       r2.readAsDataURL(fi.files[0]);
     }
@@ -5748,11 +5751,12 @@ function compInit(){
     page.classList.remove('has-bg');
     var s=document.getElementById('comp-bg-style');if(s)s.remove();
     var avEl=document.getElementById('compAvatar');avEl.style.backgroundImage='';avEl.textContent='🐳';
+    if (state.settings) { state.settings.comp_bg = null; saveState(); }
     localStorage.removeItem('comp_bg');localStorage.removeItem('comp_color');localStorage.removeItem('comp_fontsize');localStorage.removeItem('comp_bgblur');localStorage.removeItem('comp_avatar');
   });
 
   // 恢复缓存
-  var bg=localStorage.getItem('comp_bg');
+  var bg = (state.settings && state.settings.comp_bg) || localStorage.getItem('comp_bg');
   var c=localStorage.getItem('comp_color');
   var fs=localStorage.getItem('comp_fontsize');
   var bl=localStorage.getItem('comp_bgblur');
