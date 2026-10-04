@@ -428,6 +428,13 @@ setInterval(checkAutoLetter, 3 * 60 * 60 * 1000);
   setInterval(checkAvatarRandomChange, 5 * 60 * 1000);
   updateAppIconBadges();
   setInterval(updateAppIconBadges, 15000);
+
+  // 注册 Service Worker（PWA）
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(function(e) {
+      console.log('SW 注册失败：', e);
+    });
+  }
 }
 
 // ===== PERSISTENCE =====
