@@ -1,5 +1,5 @@
 // Mind Service Worker
-var CACHE_NAME = 'mind-v1';
+var CACHE_NAME = 'mind-v2';
 var URLS_TO_CACHE = [
   './',
   './index.html',
