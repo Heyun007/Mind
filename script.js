@@ -11681,8 +11681,22 @@ function renderWidgetLib() {
     html += '<div class="widget-lib-name">' + m.name + '</div>';
     html += '</div>';
   });
-  html += '</div>';
+   html += '</div>';
   content.innerHTML = html;
+
+  setTimeout(function() {
+    var previews = content.querySelectorAll('.widget-lib-preview');
+    previews.forEach(function(pv) {
+      var w = pv.offsetWidth;
+      if (!w || w < 20) return;
+      if (pv.classList.contains('medium')) {
+        pv.style.height = (w * 0.5) + 'px';
+      } else {
+        pv.style.height = w + 'px';
+      }
+      pv.style.paddingBottom = '0';
+    });
+  }, 50);
 }
 
 function openWidgetEdit(typeKey) {
@@ -11920,7 +11934,7 @@ function renderWidgetInner(type, cfg) {
         '<div style="grid-column:3;grid-row:4;">' + miniPic(cfg.img8) + '</div>' +
         // 中间黑胶
         '<div style="grid-column:2;grid-row:1 / 3;position:relative;display:flex;align-items:center;justify-content:center;">' +
-          '<div style="width:80%;aspect-ratio:1/1;border-radius:50%;background:#1a1a1a;box-shadow:0 4px 16px rgba(0,0,0,0.3);position:relative;display:flex;align-items:center;justify-content:center;">' +
+          '<div style="width:80%;height:0;padding-bottom:100%;;border-radius:50%;background:#1a1a1a;box-shadow:0 4px 16px rgba(0,0,0,0.3);position:relative;display:flex;align-items:center;justify-content:center;">' +
             // 黑色圆盘纹路
             '<div style="position:absolute;inset:6%;border-radius:50%;border:1px solid rgba(255,255,255,0.05);"></div>' +
             '<div style="position:absolute;inset:12%;border-radius:50%;border:1px solid rgba(255,255,255,0.05);"></div>' +
