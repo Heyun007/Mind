@@ -311,6 +311,10 @@ state.appPages.forEach(function(pageKeys, pageIdx) {
       wEl.style.top = (padT + w.row * (cellH + gapY)) + 'px';
       wEl.style.width = (w.colSpan * cellW + (w.colSpan - 1) * gapX) + 'px';
       wEl.style.height = (w.rowSpan * cellH + (w.rowSpan - 1) * gapY) + 'px';
+           // 【兼容老 WebView】：先确保宽度有效再渲染
+      if (cellW < 20) {
+        cellW = 80;
+      }
       wEl.style.zIndex = '5';
       wEl.style.borderRadius = '18px';
       wEl.style.overflow = 'hidden';
