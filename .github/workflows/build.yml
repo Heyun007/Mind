@@ -25,12 +25,12 @@ jobs:
           cat > app/src/main/java/com/heyun007/mind/MainActivity.java << 'EOF'
           package com.heyun007.mind;
 
+          import android.app.Activity;
           import android.os.Bundle;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
-          import androidx.appcompat.app.AppCompatActivity;
 
-          public class MainActivity extends AppCompatActivity {
+          public class MainActivity extends Activity {
               private WebView webView;
               @Override
               protected void onCreate(Bundle savedInstanceState) {
@@ -61,7 +61,7 @@ jobs:
                   android:label="Mind"
                   android:icon="@mipmap/ic_launcher"
                   android:usesCleartextTraffic="true"
-                  android:theme="@android:style/Theme.NoTitleBar">
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
                   <activity
                       android:name=".MainActivity"
                       android:exported="true">
@@ -102,9 +102,6 @@ jobs:
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
-          }
-          dependencies {
-              implementation 'androidx.appcompat:appcompat:1.6.1'
           }
           EOF
 
