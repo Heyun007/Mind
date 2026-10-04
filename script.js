@@ -286,19 +286,14 @@ state.appPages.forEach(function(pageKeys, pageIdx) {
     var pageEl = container.querySelector('.app-grid[data-page-index="' + pageIdx + '"]');
     if (!pageEl) return;
     pageEl.style.position = 'relative';
-
-      // 【vivo 兼容】：优先用 window.innerWidth，getBoundingClientRect 在旧 WebView 里可能是 0
-    var pw0 = window.innerWidth;
-    if (!pw0 || pw0 < 100) pw0 = document.documentElement.clientWidth;
-    if (!pw0 || pw0 < 100) pw0 = 390;
-    var cellW0 = (pw0 - 32 - 12 * 3) / 4;
-    pageEl.style.gridAutoRows = cellW0 + 'px';
   
     state.widgets.forEach(function(w) {
       if (w.page !== pageIdx) return;
-          var pw = window.innerWidth;
-      if (!pw || pw < 100) pw = document.documentElement.clientWidth;
-      if (!pw || pw < 100) pw = 390;
+      
+      var pw = pageEl.clientWidth;
+      if (!pw || pw < 100) pw = pageEl.offsetWidth;
+      if (!pw || pw < 100) pw = container.clientWidth;
+      if (!pw || pw < 100) pw = 358;
       var cellW = (pw - 32 - 12 * 3) / 4;
       var cellH = cellW;
       var gapX = 12, gapY = 20, padL = 16, padT = 24;
@@ -11934,7 +11929,7 @@ function renderWidgetInner(type, cfg) {
         '<div style="grid-column:3;grid-row:4;">' + miniPic(cfg.img8) + '</div>' +
         // 中间黑胶
         '<div style="grid-column:2;grid-row:1 / 3;position:relative;display:flex;align-items:center;justify-content:center;">' +
-          '<div style="width:80%;height:0;padding-bottom:100%;;border-radius:50%;background:#1a1a1a;box-shadow:0 4px 16px rgba(0,0,0,0.3);position:relative;display:flex;align-items:center;justify-content:center;">' +
+         '<div style="width:80%;height:0;padding-bottom:80%;border-radius:50%;background:#1a1a1a;box-shadow:0 4px 16px rgba(0,0,0,0.3);position:relative;display:flex;align-items:center;justify-content:center;">' +
             // 黑色圆盘纹路
             '<div style="position:absolute;inset:6%;border-radius:50%;border:1px solid rgba(255,255,255,0.05);"></div>' +
             '<div style="position:absolute;inset:12%;border-radius:50%;border:1px solid rgba(255,255,255,0.05);"></div>' +
