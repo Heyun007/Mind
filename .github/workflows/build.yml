@@ -60,12 +60,26 @@ jobs:
                       public boolean onShowFileChooser(WebView wv, ValueCallback<Uri[]> cb, FileChooserParams params) {
                           if (filePathCallback != null) filePathCallback.onReceiveValue(null);
                           filePathCallback = cb;
+
+                          // 【核心修复】：用 ACTION_GET_CONTENT + OPEN_DOCUMENT，兼容 vivo
+                          Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                          intent.addCategory(Intent.CATEGORY_OPENABLE);
+                          intent.setType("*/*");
+                          intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+
                           try {
-                              Intent intent = params.createIntent();
-                              startActivityForResult(intent, FILE_CHOOSER_CODE);
+                              startActivityForResult(Intent.createChooser(intent, "选择文件"), FILE_CHOOSER_CODE);
                           } catch (Exception e) {
-                              filePathCallback = null;
-                              return false;
+                              // 兜底：试 OPEN_DOCUMENT
+                              try {
+                                  Intent i2 = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                                  i2.addCategory(Intent.CATEGORY_OPENABLE);
+                                  i2.setType("*/*");
+                                  startActivityForResult(i2, FILE_CHOOSER_CODE);
+                              } catch (Exception e2) {
+                                  filePathCallback = null;
+                                  return false;
+                              }
                           }
                           return true;
                       }
