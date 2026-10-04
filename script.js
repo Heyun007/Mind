@@ -1164,6 +1164,57 @@ function handleCheckinBg(e) {
   reader.readAsDataURL(file);
 }
 
+// ===== 清除所有数据 =====
+function clearAllData() {
+  if (!confirm('确定要清除所有数据吗？\n\n包括梦角、聊天记录、日记、字卡、备忘录、小组件、设置等全部内容。\n\n此操作不可恢复！')) return;
+  if (!confirm('再次确认：真的要清除吗？')) return;
+
+  // 清空 localStorage
+  try { localStorage.clear(); } catch(e) {}
+
+  // 清空 IndexedDB
+  dbPromise.then(function(db) {
+    try {
+      var tx1 = db.transaction('stateStore', 'readwrite');
+      tx1.objectStore('stateStore').clear();
+      var tx2 = db.transaction('stickerStore', 'readwrite');
+      tx2.objectStore('stickerStore').clear();
+    } catch(e) {}
+    setTimeout(function() { location.reload(); }, 300);
+  }).catch(function() {
+    setTimeout(function() { location.reload(); }, 300);
+  });
+}
+
+// ===== 导出字卡 =====
+function exportCards() {
+  var groups = state.categories.map(function(cat) {
+    var items = state.cards
+      .filter(function(c) { return c.cat === cat.id; })
+      .map(function(c) { return c.text; });
+    return { name: cat.name, items: items };
+  });
+
+  var data = {
+    customReplyGroups: groups,
+    exportAt: new Date().toISOString(),
+    version: 1
+  };
+
+  var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'Mind_字卡_' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function() { URL.revokeObjectURL(url); }, 1500);
+
+  var totalCards = state.cards.length;
+  showToast('已导出 ' + state.categories.length + ' 个分组、' + totalCards + ' 张字卡');
+}
+
 function backupData() {
   var data = {
     state: state,
