@@ -189,27 +189,28 @@ function renderAppIcons() {
     page.dataset.pageIndex = pageIdx;
     page.style.cssText = 'flex-shrink:0;width:100%;scroll-snap-align:start;';
 
-    // 先算出这一页被 widget 占用的格子
-    var occupiedSlots = {};
+    // ===== 先放小组件（用网格位置，不用绝对定位） =====
     state.widgets.forEach(function(w) {
       if (w.page !== pageIdx) return;
-      for (var wr = w.row; wr < w.row + w.rowSpan; wr++) {
-        for (var wc = w.col; wc < w.col + w.colSpan; wc++) {
-          occupiedSlots[wr * 4 + wc] = true;
-        }
-      }
+      var wEl = document.createElement('div');
+      wEl.className = 'home-widget';
+      wEl.dataset.widgetId = w.id;
+      wEl.style.gridColumn = (w.col + 1) + ' / span ' + w.colSpan;
+      wEl.style.gridRow = (w.row + 1) + ' / span ' + w.rowSpan;
+      wEl.style.zIndex = '2';
+      wEl.innerHTML = renderWidgetInner(w.type, w.config);
+      wEl.addEventListener('click', (function(id) {
+        return function(ev) {
+          ev.stopPropagation();
+          if (window.appEditMode) return;
+          openWidgetFromHome(id);
+        };
+      })(w.id));
+      page.appendChild(wEl);
     });
 
+    // ===== 再放图标（浏览器自动跳过小组件占用的格子） =====
     for (var slot = 0; slot < APP_PER_PAGE; slot++) {
-      // 被 widget 占用 → 只放占位空槽
-      if (occupiedSlots[slot]) {
-        var occupiedDiv = document.createElement('div');
-        occupiedDiv.className = 'app-icon-slot';
-        occupiedDiv.style.cssText = 'width:100%;height:82px;';
-        page.appendChild(occupiedDiv);
-        continue;
-      }
-
       var key = pageKeys[slot];
       if (!key) {
         var empty = document.createElement('div');
@@ -257,22 +258,17 @@ function renderAppIcons() {
     container.appendChild(page);
   });
 
-  // 保存旧的滚动位置
   var oldSwiper = document.getElementById('homeSwiper');
   var oldScrollLeft = oldSwiper ? oldSwiper.scrollLeft : 0;
 
-  // 插到主页
   var mainContent = document.getElementById('pageHome');
   mainContent.innerHTML = '';
   mainContent.appendChild(container);
 
-  // 恢复滚动位置
   if (oldScrollLeft > 0) {
     container.scrollLeft = oldScrollLeft;
-    // 有时候 layout 还没算完，需要下一帧再设一次
     requestAnimationFrame(function() {
       container.scrollLeft = oldScrollLeft;
-      // 更新小点状态
       var idx = Math.round(container.scrollLeft / container.offsetWidth);
       var dots = document.querySelectorAll('#homePager span');
       dots.forEach(function(d, i) {
@@ -281,54 +277,6 @@ function renderAppIcons() {
     });
   }
 
-  // 渲染每一页里的小组件（绝对定位覆盖在网格上）
-state.appPages.forEach(function(pageKeys, pageIdx) {
-    var pageEl = container.querySelector('.app-grid[data-page-index="' + pageIdx + '"]');
-    if (!pageEl) return;
-    pageEl.style.position = 'relative';
-  
-    state.widgets.forEach(function(w) {
-      if (w.page !== pageIdx) return;
-      
-      var pw = pageEl.clientWidth;
-      if (!pw || pw < 100) pw = pageEl.offsetWidth;
-      if (!pw || pw < 100) pw = container.clientWidth;
-      if (!pw || pw < 100) pw = 358;
-      var cellW = (pw - 32 - 12 * 3) / 4;
-      var cellH = cellW;
-      var gapX = 12, gapY = 20, padL = 16, padT = 24;
-
-      var wEl = document.createElement('div');
-      wEl.className = 'home-widget';
-      wEl.dataset.widgetId = w.id;
-      wEl.style.position = 'absolute';
-      wEl.style.left = (padL + w.col * (cellW + gapX)) + 'px';
-      wEl.style.top = (padT + w.row * (cellH + gapY)) + 'px';
-      wEl.style.width = (w.colSpan * cellW + (w.colSpan - 1) * gapX) + 'px';
-      wEl.style.height = (w.rowSpan * cellH + (w.rowSpan - 1) * gapY) + 'px';
-           // 【兼容老 WebView】：先确保宽度有效再渲染
-      if (cellW < 20) {
-        cellW = 80;
-      }
-      wEl.style.zIndex = '5';
-      wEl.style.borderRadius = '18px';
-      wEl.style.overflow = 'hidden';
-      wEl.innerHTML = renderWidgetInner(w.type, w.config);
-      wEl.addEventListener('click', (function(id) {
-        return function(ev) {
-          ev.stopPropagation();
-          if (window.appEditMode) return;
-          openWidgetFromHome(id);
-        };
-      })(w.id));
-
-            // 长按拖动（事件委托，在 initAppDragListeners 里统一处理）
-
-      pageEl.appendChild(wEl);
-    });
-  });
-
-  // 底部小点
   if (state.appPages.length > 1) {
     var pager = document.createElement('div');
     pager.id = 'homePager';
@@ -350,7 +298,6 @@ state.appPages.forEach(function(pageKeys, pageIdx) {
     });
   }
 
-  // 如果当前在编辑模式，让 widgets 也保持抖动
   if (window.appEditMode) {
     document.querySelectorAll('.home-widget').forEach(function(el) { el.classList.add('editing'); });
   }
