@@ -962,7 +962,7 @@ button[onclick="sendChatMsg()"] {
 .diary-cover-user {
   position: absolute;
   right: 16px;
-  bottom: -22px;
+  bottom: 12px;
   display: flex;
   align-items: flex-end;
   gap: 12px;
@@ -970,7 +970,7 @@ button[onclick="sendChatMsg()"] {
 }
 .diary-cover-user-info {
   text-align: right;
-  padding-bottom: 30px;
+  padding-bottom: 0;
 }
 .diary-cover-name {
   font-size: 17px;
@@ -994,7 +994,7 @@ button[onclick="sendChatMsg()"] {
   background: #f0f0f5;
 }
 .diary-list {
-  padding: 34px 0 20px;
+  padding: 0 0 20px;
   display: flex;
   flex-direction: column;
 }
