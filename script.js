@@ -69,7 +69,9 @@ let state = {
   widgets: [],
   memos: [],
   quizQuestions: [],
+  quizGroups: [],
   quizMeQuestions: [],
+  quizMeGroups: [],
   quizHistory: [],
   avatarLibrary: [],
   lastAvatarScan: 0,
@@ -279,22 +281,19 @@ function renderAppIcons() {
     if (!pageEl) return;
     pageEl.style.position = 'relative';
 
-    state.widgets.forEach(function(w) {
+       state.widgets.forEach(function(w) {
       if (w.page !== pageIdx) return;
-      var pw = pageEl.getBoundingClientRect().width;
-      if (!pw || pw < 100) pw = window.innerWidth;
-      if (!pw || pw < 100) pw = 390;
-      var cellW = (pw - 32 - 12 * 3) / 4;
       var cellH = 82;
-      var gapX = 12, gapY = 20, padL = 16, padT = 24;
+      var gapY = 20, padT = 24;
 
       var wEl = document.createElement('div');
       wEl.className = 'home-widget';
       wEl.dataset.widgetId = w.id;
       wEl.style.position = 'absolute';
-      wEl.style.left = (padL + w.col * (cellW + gapX)) + 'px';
+      // 用 calc + 100% 让宽度随页面自适应，永远不会溢出
+      wEl.style.left = 'calc(16px + ' + w.col + ' * ((100% - 68px) / 4 + 12px))';
       wEl.style.top = (padT + w.row * (cellH + gapY)) + 'px';
-      wEl.style.width = (w.colSpan * cellW + (w.colSpan - 1) * gapX) + 'px';
+      wEl.style.width = 'calc(' + w.colSpan + ' * ((100% - 68px) / 4) + ' + (w.colSpan - 1) + ' * 12px)';
       wEl.style.height = (w.rowSpan * cellH + (w.rowSpan - 1) * gapY) + 'px';
       wEl.style.zIndex = '5';
       wEl.style.borderRadius = '18px';
@@ -331,6 +330,18 @@ function renderAppIcons() {
         d.style.background = (i === idx) ? 'var(--blue)' : 'rgba(0,0,0,0.15)';
       });
     });
+
+    container.addEventListener('wheel', function(e) {
+      if (Math.abs(e.deltaX) < Math.abs(e.deltaY) * 0.5) return;
+      e.preventDefault();
+      var pageW = container.offsetWidth || 1;
+      var cur = Math.round(container.scrollLeft / pageW);
+      var dir = e.deltaX > 0 ? 1 : -1;
+      var next = cur + dir;
+      if (next < 0) next = 0;
+      if (next >= state.appPages.length) next = state.appPages.length - 1;
+      container.scrollTo({ left: next * pageW, behavior: 'smooth' });
+    }, { passive: false });
   }
 
   if (window.appEditMode) {
@@ -504,6 +515,8 @@ function loadState() {
             if (parsed.giftItems) state.giftItems = parsed.giftItems;
             if (parsed.memos) state.memos = parsed.memos;
             if (parsed.quizQuestions) state.quizQuestions = parsed.quizQuestions;
+            if (parsed.quizGroups) state.quizGroups = parsed.quizGroups;
+            if (parsed.quizMeGroups) state.quizMeGroups = parsed.quizMeGroups;
             if (parsed.widgets) state.widgets = parsed.widgets;
             if (parsed.quizMeQuestions) state.quizMeQuestions = parsed.quizMeQuestions;
             if (parsed.quizHistory) state.quizHistory = parsed.quizHistory;
@@ -1621,6 +1634,18 @@ async function sendNotification(title, body) {
   if (!state.settings.pushEnabled) return;
   if (!('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
+    // 正在聊天界面时，本聊天的消息不弹通知
+  var _chatPage = document.getElementById('pagePrivateChat');
+  if (_chatPage && _chatPage.classList.contains('active') && state.currentChatId) {
+    if (state.currentChatId.startsWith('group_')) {
+      // 在群聊里 → 任何成员的消息都不弹（因为你能直接看到）
+      return;
+    } else {
+      // 在私聊里 → 只有当前私聊对象的消息不弹；其他梦角发的照样弹
+      var _curDream = state.dreams.find(function(x) { return x.id === state.currentChatId; });
+      if (_curDream && _curDream.name === title) return;
+    }
+  }
   try {
     const reg = await navigator.serviceWorker.ready;
     reg.showNotification(title, {
@@ -2923,7 +2948,7 @@ function renderChatMessages() {
       var qHtml = '<div data-msg-index="' + i + '" style="display:flex;justify-content:' + (isMineQ ? 'flex-end' : 'flex-start') + ';margin-bottom:10px;">';
       qHtml += '<div onclick="openQuizAnswerModal(\'' + m.packetId + '\')" class="quiz-card-msg">';
       qHtml += '<div style="display:flex;align-items:center;margin-bottom:6px;">';
-      qHtml += '<span class="quiz-card-icon">📋</span>';
+      qHtml += '<span class="quiz-card-icon" style="display:inline-flex;align-items:center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1d1d1f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></svg></span>';
       qHtml += '<span class="quiz-card-title">' + titleText + '</span>';
       qHtml += '</div>';
       qHtml += '<div class="quiz-card-sub">' + subText + '</div>';
@@ -2959,7 +2984,7 @@ function renderChatMessages() {
       var cHtml = '<div data-msg-index="' + i + '" style="display:flex;justify-content:' + (isMineC ? 'flex-end' : 'flex-start') + ';margin-bottom:10px;">';
       cHtml += '<div style="width:230px;background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 4px 14px rgba(0,0,0,0.08);border:1px solid rgba(0,0,0,0.05);">';
       cHtml += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">';
-      cHtml += '<span style="font-size:20px;">⚖️</span>';
+      cHtml += '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1d1d1f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="3" x2="12" y2="21"/><line x1="5" y1="6" x2="19" y2="6"/><path d="M5 6 2 13a3 3 0 0 0 6 0z"/><path d="M19 6l-3 7a3 3 0 0 0 6 0z"/><line x1="8" y1="21" x2="16" y2="21"/></svg>';
       cHtml += '<span style="font-size:13px;font-weight:600;color:#1d1d1f;">抉择</span>';
       cHtml += '</div>';
       cHtml += '<div style="font-size:13px;color:#333;line-height:1.5;margin-bottom:10px;word-break:break-word;">' + escapeHtml(m.question) + '</div>';
@@ -2998,16 +3023,16 @@ function renderChatMessages() {
       html += '</div>';
       continue; // 拦截成功，跳过后面的气泡渲染
     }
-        if (m.type === 'redpacket') {
+          if (m.type === 'redpacket') {
       var isMine = m.from === 'user';
       var rpHtml = '<div data-msg-index="' + i + '" style="display:flex;justify-content:' + (isMine ? 'flex-end' : 'flex-start') + ';margin-bottom:10px;">';
-      rpHtml += '<div onclick="openRedPacketDetail(\'' + m.packetId + '\')" style="cursor:pointer;width:210px;background:linear-gradient(135deg,#fa5151,#d13333);border-radius:12px;padding:14px 16px;color:#fff;box-shadow:0 4px 14px rgba(250,81,81,0.3);' + (m.refunded ? 'opacity:0.55;' : '') + '">';
+      rpHtml += '<div onclick="openRedPacketDetail(\'' + m.packetId + '\')" style="cursor:pointer;width:210px;background:linear-gradient(135deg,#f5f5f7,#e8e8ed);border-radius:12px;padding:14px 16px;color:#333;box-shadow:0 4px 14px rgba(0,0,0,0.08);border:1px solid rgba(255,255,255,0.7);' + (m.refunded ? 'opacity:0.55;' : '') + '">';
       rpHtml += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-      rpHtml += '<span style="font-size:22px;">🧧</span>';
+      rpHtml += '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1d1d1f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
       rpHtml += '<span style="font-size:14px;font-weight:600;">' + (isMine ? '我发的红包' : m.senderName + ' 发的红包') + '</span>';
       rpHtml += '</div>';
-      rpHtml += '<div style="font-size:12px;opacity:0.9;line-height:1.4;">' + m.message + '</div>';
-      rpHtml += '<div style="font-size:11px;opacity:0.75;margin-top:6px;">' + (m.refunded ? '已退回' : ('已领 ' + (m.claimed ? m.claimed.length : 0) + '/' + m.maxPeople)) + '</div>';
+      rpHtml += '<div style="font-size:12px;color:#666;line-height:1.4;">' + m.message + '</div>';
+      rpHtml += '<div style="font-size:11px;color:#888;margin-top:6px;">' + (m.refunded ? '已退回' : ('已领 ' + (m.claimed ? m.claimed.length : 0) + '/' + m.maxPeople)) + '</div>';
       rpHtml += '</div>';
       rpHtml += '</div>';
       html += rpHtml;
@@ -3020,7 +3045,7 @@ function renderChatMessages() {
       var gHtml = '<div data-msg-index="' + i + '" style="display:flex;justify-content:' + (isMineG ? 'flex-end' : 'flex-start') + ';margin-bottom:10px;">';
       gHtml += '<div onclick="openGiftDetail(\'' + m.packetId + '\')" style="cursor:pointer;width:210px;background:linear-gradient(135deg,#f5f5f7,#e8e8ed);border-radius:12px;padding:14px 16px;color:#333;box-shadow:0 4px 14px rgba(0,0,0,0.08);border:1px solid rgba(255,255,255,0.7);' + (m.refunded ? 'opacity:0.55;' : '') + '">';
       gHtml += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-      gHtml += '<span style="font-size:22px;">🎁</span>';
+      gHtml += '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1d1d1f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="1.5"/><path d="M3 13h18"/><path d="M12 9v12"/><path d="M12 9c-2 0-4-1.5-4-3.2S10 3 12 5s4-.5 4 2.2S14 9 12 9z"/></svg>';
       gHtml += '<span style="font-size:14px;font-weight:600;">' + (isMineG ? '我送的礼物' : m.senderName + ' 送的礼物') + '</span>';
       gHtml += '</div>';
       gHtml += '<div style="font-size:13px;color:#333;line-height:1.4;">' + m.giftName + ' ×' + m.count + '</div>';
@@ -3163,6 +3188,14 @@ function renderChatMessages() {
   }
   container.scrollTop = container.scrollHeight;
   attachLongPress();
+
+   // 只有真的在聊天界面，才把当前聊天标记为"已读"
+  var _mp = document.getElementById('pagePrivateChat');
+  if (state.currentChatId && _mp && _mp.classList.contains('active')) {
+    if (!state.lastReadAt) state.lastReadAt = {};
+    state.lastReadAt[state.currentChatId] = Date.now();
+    saveState();
+  }
 }
 // ===== 渲染聊天列表 =====
 function renderChatList() {
@@ -5067,7 +5100,8 @@ function checkAutoMessage() {
   saveState();
 
   // 如果用户正在这个聊天窗口，实时刷新
-  if (state.currentChatId === picked.id) {
+  var _chatPage = document.getElementById('pagePrivateChat');
+  if (state.currentChatId === picked.id && _chatPage && _chatPage.classList.contains('active')) {
     loadChatMessages();
     renderChatMessages();
   }
@@ -9564,11 +9598,14 @@ window._quizCurrentPacketId = null;
 
 function initQuizData() {
   if (!state.quizQuestions || !Array.isArray(state.quizQuestions)) state.quizQuestions = [];
+  if (!state.quizGroups || !Array.isArray(state.quizGroups)) state.quizGroups = [];
   if (!state.quizHistory || !Array.isArray(state.quizHistory)) state.quizHistory = [];
 }
 
 function switchQuizTab(tab) {
   window._quizTab = tab;
+    var _oldBar2 = document.getElementById('quizFixedBar');
+  if (_oldBar2) _oldBar2.remove();
   var tabs = [
     { id: 'quizTabDream', key: 'dream' },
     { id: 'quizTabMe', key: 'me' },
@@ -9596,16 +9633,49 @@ function renderQuizDreamTab() {
   var content = document.getElementById('quizTabContent');
   if (!content) return;
 
-  var html = '<button class="quiz-add-btn" onclick="openQuizAddModal()">+ 添加问题</button>';
-  html += '<div style="padding:0 16px 80px;">';
-  html += '<div style="font-size:12px;color:var(--gray);margin-bottom:8px;">当前题库：' + state.quizQuestions.length + ' 条</div>';
-  if (state.quizQuestions.length === 0) {
+  var totalSingle = state.quizQuestions.length;
+  var totalGroups = state.quizGroups.length;
+
+  var html = '';
+  html += '<div style="padding:12px 16px 0;display:flex;gap:8px;">';
+  html += '<button class="quiz-add-btn" onclick="openQuizAddModal()" style="flex:1;margin:0;">+ 添加问题</button>';
+  html += '<button class="quiz-add-btn" onclick="openQuizDreamAddGroupModal()" style="flex:1;margin:0;">+ 添加分组</button>';
+  html += '</div>';
+
+  html += '<div style="padding:8px 16px 40px;">';
+  html += '<div style="font-size:12px;color:var(--gray);margin-bottom:10px;">当前题库：' + totalSingle + ' 条 · ' + totalGroups + ' 组（梦角会随机抽 1-5 条 或 随机一个分组）</div>';
+
+  // 分组列表
+  if (state.quizGroups.length > 0) {
+    state.quizGroups.forEach(function(g) {
+      var count = (g.questions || []).length;
+      html += '<div class="quiz-item" onclick="openQuizDreamGroupDetail(\'' + g.id + '\')" style="cursor:pointer;">';
+      html += '<div class="quiz-item-text">';
+      html += '<div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:4px;">📁 ' + escapeHtml(g.name) + '</div>';
+      html += '<div style="font-size:12px;color:#86868b;">' + count + ' 条问题</div>';
+      html += '</div>';
+      html += '<span class="quiz-item-del" onclick="event.stopPropagation();deleteQuizDreamGroup(\'' + g.id + '\')">×</span>';
+      html += '</div>';
+    });
+  }
+
+  // 未归入任何分组的单题
+  var groupedTexts = {};
+  state.quizGroups.forEach(function(g) {
+    (g.questions || []).forEach(function(q) { groupedTexts[q] = true; });
+  });
+  var ungrouped = state.quizQuestions.filter(function(q) { return !groupedTexts[q]; });
+
+  if (totalSingle === 0 && totalGroups === 0) {
     html += '<div style="text-align:center;color:var(--gray);font-size:13px;padding:40px 20px;">还没有问题，点上方按钮添加吧</div>';
+  } else if (ungrouped.length === 0 && totalGroups > 0) {
+    html += '<div style="text-align:center;color:var(--gray);font-size:13px;padding:20px;">所有问题都已归入分组</div>';
   } else {
-    state.quizQuestions.forEach(function(q, i) {
+    ungrouped.forEach(function(q) {
+      var realIdx = state.quizQuestions.indexOf(q);
       html += '<div class="quiz-item">';
       html += '<div class="quiz-item-text">' + escapeHtml(q) + '</div>';
-      html += '<span class="quiz-item-del" onclick="deleteQuizQuestion(' + i + ')">×</span>';
+      html += '<span class="quiz-item-del" onclick="deleteQuizQuestion(' + realIdx + ')">×</span>';
       html += '</div>';
     });
   }
@@ -9613,9 +9683,134 @@ function renderQuizDreamTab() {
   content.innerHTML = html;
 }
 
+function openQuizDreamAddGroupModal() {
+  initQuizData();
+  var name = prompt('分组名称：');
+  if (!name || !name.trim()) return;
+  state.quizGroups.push({
+    id: 'qg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    name: name.trim(),
+    questions: []
+  });
+  saveState();
+  renderQuizDreamTab();
+  showToast('分组已创建');
+}
+
+function deleteQuizDreamGroup(gid) {
+  if (!confirm('删除该分组？里面的问题会回到未分组状态。')) return;
+  state.quizGroups = state.quizGroups.filter(function(g) { return g.id !== gid; });
+  saveState();
+  renderQuizDreamTab();
+  showToast('分组已删除');
+}
+
+function openQuizDreamGroupDetail(gid) {
+  window._currentQuizDreamGroupId = gid;
+  var g = state.quizGroups.find(function(x) { return x.id === gid; });
+  if (!g) { showToast('分组不存在'); return; }
+  var titleEl = document.getElementById('quizDreamGroupTitle');
+  if (titleEl) titleEl.textContent = g.name;
+  renderQuizDreamGroupDetail();
+  navigateTo('pageQuizDreamGroup');
+}
+
+function renderQuizDreamGroupDetail() {
+  initQuizData();
+  var gid = window._currentQuizDreamGroupId;
+  var g = state.quizGroups.find(function(x) { return x.id === gid; });
+  if (!g) { navigateTo('pageQuiz'); return; }
+
+  var container = document.getElementById('quizDreamGroupContent');
+  if (!container) return;
+
+  var html = '';
+  html += '<div style="padding:12px 16px 0;display:flex;gap:8px;">';
+  html += '<button class="quiz-add-btn" onclick="openQuizDreamAddInGroup(\'' + gid + '\')" style="flex:1;margin:0;">+ 新建问题到本组</button>';
+  html += '<button class="quiz-add-btn" onclick="openQuizDreamAddFromBank(\'' + gid + '\')" style="flex:1;margin:0;">+ 从题库选择</button>';
+  html += '</div>';
+  html += '<div style="padding:8px 16px 40px;">';
+  html += '<div style="font-size:12px;color:var(--gray);margin-bottom:8px;">本组共 ' + (g.questions || []).length + ' 条</div>';
+
+  var qs = g.questions || [];
+  if (qs.length === 0) {
+    html += '<div style="text-align:center;color:var(--gray);font-size:13px;padding:40px 20px;">本组还没有问题，点上方按钮添加吧</div>';
+  } else {
+    qs.forEach(function(text, idx) {
+      html += '<div class="quiz-item">';
+      html += '<div class="quiz-item-text">' + escapeHtml(text) + '</div>';
+      html += '<span class="quiz-item-del" onclick="removeFromQuizDreamGroup(\'' + gid + '\',' + idx + ')">×</span>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function removeFromQuizDreamGroup(gid, idx) {
+  var g = state.quizGroups.find(function(x) { return x.id === gid; });
+  if (!g || !g.questions) return;
+  g.questions.splice(idx, 1);
+  saveState();
+  renderQuizDreamGroupDetail();
+  showToast('已移出分组');
+}
+
+function openQuizDreamAddInGroup(gid) {
+  window._quizDreamAddTargetGroup = gid;
+  window._quizAddTab = 'single';
+  var m = document.getElementById('quizAddModal');
+  if (!m) return;
+  document.getElementById('quizAddSingleInput').value = '';
+  document.getElementById('quizAddBatchInput').value = '';
+  switchQuizAddTab('single');
+  m.classList.add('show');
+  setTimeout(function() { document.getElementById('quizAddSingleInput').focus(); }, 100);
+}
+
+function openQuizDreamAddFromBank(gid) {
+  initQuizData();
+  var g = state.quizGroups.find(function(x) { return x.id === gid; });
+  if (!g) return;
+
+  var groupedTexts = {};
+  state.quizGroups.forEach(function(gg) {
+    (gg.questions || []).forEach(function(q) { groupedTexts[q] = true; });
+  });
+  var available = state.quizQuestions.filter(function(q) { return !groupedTexts[q]; });
+
+  if (available.length === 0) {
+    showToast('没有可添加的问题，请先去主页添加');
+    return;
+  }
+
+  var lines = available.map(function(q, i) { return (i+1) + '. ' + q; });
+  var msg = '输入要加入本组的问题编号（多个用逗号分隔）：\n\n' + lines.join('\n');
+  var choice = prompt(msg);
+  if (!choice) return;
+
+  var nums = choice.split(/[,，\s]+/).map(function(s) { return parseInt(s); }).filter(function(n) { return !isNaN(n) && n >= 1 && n <= available.length; });
+  if (nums.length === 0) { showToast('未选择'); return; }
+
+  if (!g.questions) g.questions = [];
+  nums.forEach(function(n) {
+    var q = available[n-1];
+    if (q && g.questions.indexOf(q) === -1) g.questions.push(q);
+  });
+  saveState();
+  renderQuizDreamGroupDetail();
+  showToast('已加入 ' + nums.length + ' 条');
+}
+
 function deleteQuizQuestion(idx) {
   if (!state.quizQuestions || idx < 0 || idx >= state.quizQuestions.length) return;
+  var removed = state.quizQuestions[idx];
   state.quizQuestions.splice(idx, 1);
+  state.quizGroups.forEach(function(g) {
+    if (g.questions) {
+      g.questions = g.questions.filter(function(q) { return q !== removed; });
+    }
+  });
   saveState();
   renderQuizDreamTab();
   showToast('已删除');
@@ -9660,43 +9855,110 @@ function switchQuizAddTab(tab) {
 
 function confirmQuizAdd() {
   initQuizData();
+  var targetGid = window._quizDreamAddTargetGroup || null;
+
+  function saveToGroup(items) {
+    var added = 0;
+    items.forEach(function(text) {
+      if (state.quizQuestions.indexOf(text) === -1) {
+        state.quizQuestions.push(text);
+      }
+      if (targetGid) {
+        var g = state.quizGroups.find(function(x) { return x.id === targetGid; });
+        if (g) {
+          if (!g.questions) g.questions = [];
+          if (g.questions.indexOf(text) === -1) g.questions.push(text);
+        }
+      }
+      added++;
+    });
+    return added;
+  }
+
   if (window._quizAddTab === 'single') {
     var v = (document.getElementById('quizAddSingleInput').value || '').trim();
     if (!v) { showToast('请输入问题'); return; }
-    if (state.quizQuestions.indexOf(v) > -1) { showToast('问题已存在'); return; }
-    state.quizQuestions.push(v);
+    if (!targetGid && state.quizQuestions.indexOf(v) > -1) { showToast('问题已存在'); return; }
+    if (targetGid) {
+      var g0 = state.quizGroups.find(function(x) { return x.id === targetGid; });
+      if (g0 && (g0.questions || []).indexOf(v) > -1) { showToast('该组已有此问题'); return; }
+    }
+    saveToGroup([v]);
     saveState();
     closeQuizAddModal();
-    renderQuizDreamTab();
+    window._quizDreamAddTargetGroup = null;
+    if (document.getElementById('pageQuizDreamGroup').classList.contains('active')) {
+      renderQuizDreamGroupDetail();
+    } else {
+      renderQuizDreamTab();
+    }
     showToast('已添加');
   } else {
     var raw = document.getElementById('quizAddBatchInput').value || '';
     var lines = raw.split('\n').map(function(s){ return s.trim(); }).filter(function(s){ return s; });
     if (lines.length === 0) { showToast('请输入问题'); return; }
-    var added = 0, skipped = 0;
-    lines.forEach(function(l) {
-      if (state.quizQuestions.indexOf(l) > -1) { skipped++; return; }
-      state.quizQuestions.push(l);
-      added++;
-    });
+    var added = saveToGroup(lines);
     saveState();
     closeQuizAddModal();
-    renderQuizDreamTab();
-    if (skipped > 0) showToast('已添加 ' + added + ' 条，跳过 ' + skipped + ' 条重复');
-    else showToast('已添加 ' + added + ' 条');
+    window._quizDreamAddTargetGroup = null;
+    if (document.getElementById('pageQuizDreamGroup').classList.contains('active')) {
+      renderQuizDreamGroupDetail();
+    } else {
+      renderQuizDreamTab();
+    }
+    showToast('已添加 ' + added + ' 条');
   }
 }
 
 // ===== 梦角主动发问卷（在 dreamReply 里调用） =====
 function maybeSendQuizQuestion(senderId) {
   initQuizData();
-  if (state.quizQuestions.length === 0) return;
   if (Math.random() > 0.05) return;
 
-  // 随机抽 1-5 个问题
-  var count = 1 + Math.floor(Math.random() * Math.min(5, state.quizQuestions.length));
-  var pool = state.quizQuestions.slice().sort(function() { return Math.random() - 0.5; });
-  var picked = pool.slice(0, count);
+  // 计算可用单题（未归入任何分组）和可用分组
+  var groupedTexts = {};
+  state.quizGroups.forEach(function(g) {
+    (g.questions || []).forEach(function(q) { groupedTexts[q] = true; });
+  });
+  var singlesPool = state.quizQuestions.filter(function(q) { return !groupedTexts[q]; });
+  var validGroups = state.quizGroups.filter(function(g) {
+    return g.questions && g.questions.length > 0;
+  });
+
+  var hasSingles = singlesPool.length > 0;
+  var hasGroups = validGroups.length > 0;
+  if (!hasSingles && !hasGroups) return;
+
+  var picked = [];
+  var sourceType = 'single';
+  var sourceGroupName = '';
+
+  if (hasSingles && hasGroups) {
+    // 都有：50% 抽单题，50% 抽分组
+    if (Math.random() < 0.5) {
+      var count = 1 + Math.floor(Math.random() * Math.min(5, singlesPool.length));
+      var pool = singlesPool.slice().sort(function() { return Math.random() - 0.5; });
+      picked = pool.slice(0, count);
+    } else {
+      var g = validGroups[Math.floor(Math.random() * validGroups.length)];
+      picked = g.questions.slice();
+      sourceType = 'group';
+      sourceGroupName = g.name;
+    }
+  } else if (hasSingles) {
+    // 只有单题
+    var count2 = 1 + Math.floor(Math.random() * Math.min(5, singlesPool.length));
+    var pool2 = singlesPool.slice().sort(function() { return Math.random() - 0.5; });
+    picked = pool2.slice(0, count2);
+  } else {
+    // 只有分组
+    var g2 = validGroups[Math.floor(Math.random() * validGroups.length)];
+    picked = g2.questions.slice();
+    sourceType = 'group';
+    sourceGroupName = g2.name;
+  }
+
+  if (picked.length === 0) return;
 
   // 确定提问者
   var askerId = senderId;
@@ -9720,7 +9982,9 @@ function maybeSendQuizQuestion(senderId) {
     questions: picked.slice(),
     answers: null,
     read: false,
-    time: Date.now()
+    time: Date.now(),
+    sourceType: sourceType,
+    sourceGroupName: sourceGroupName
   };
 
   chatMessages.push(packet);
@@ -10067,6 +10331,7 @@ window._quizMePressTimer = null;
 
 function initQuizMeData() {
   if (!state.quizMeQuestions || !Array.isArray(state.quizMeQuestions)) state.quizMeQuestions = [];
+  if (!state.quizMeGroups || !Array.isArray(state.quizMeGroups)) state.quizMeGroups = [];
 }
 
 function renderQuizMeTab() {
@@ -10074,37 +10339,294 @@ function renderQuizMeTab() {
   var content = document.getElementById('quizTabContent');
   if (!content) return;
 
+  var totalSingle = state.quizMeQuestions.length;
+  var totalGroups = state.quizMeGroups.length;
+
   var html = '';
-  html += '<button class="quiz-add-btn" onclick="openQuizMeAddModal()">+ 添加题目</button>';
-  html += '<div style="padding:0 16px 80px;">';
-  html += '<div style="font-size:12px;color:var(--gray);margin-bottom:8px;">当前题库：' + state.quizMeQuestions.length + ' 条（长按题目 3 秒可多选发送）</div>';
-  if (state.quizMeQuestions.length === 0) {
+  html += '<div style="padding:12px 16px 0;display:flex;gap:8px;">';
+  html += '<button class="quiz-add-btn" onclick="openQuizMeAddModal()" style="flex:1;margin:0;">+ 添加题目</button>';
+  html += '<button class="quiz-add-btn" onclick="openQuizMeAddGroupModal()" style="flex:1;margin:0;">+ 添加分组</button>';
+  html += '</div>';
+
+  html += '<div style="padding:8px 16px 100px;">';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+  html += '<span style="font-size:12px;color:var(--gray);">当前题库：' + totalSingle + ' 题 · ' + totalGroups + ' 组</span>';
+  html += '<button onclick="toggleQuizMeSelect()" style="padding:4px 14px;border:1px solid var(--border);background:var(--card);border-radius:14px;font-size:12px;cursor:pointer;color:' + (window._quizMeSelectMode ? 'var(--red)' : 'var(--blue)') + ';">' + (window._quizMeSelectMode ? '取消' : '选择') + '</button>';
+  html += '</div>';
+
+  // 分组列表
+  if (state.quizMeGroups.length > 0) {
+    state.quizMeGroups.forEach(function(g) {
+      var count = (g.questionIds || []).length;
+      var selected = window._quizMeSelectMode && window._quizMeSelectedGroups && window._quizMeSelectedGroups.indexOf(g.id) > -1;
+      var clickAction = window._quizMeSelectMode
+        ? 'toggleQuizMeGroupSelect(\'' + g.id + '\')'
+        : 'openQuizMeGroupDetail(\'' + g.id + '\')';
+      html += '<div class="quiz-item" onclick="' + clickAction + '" style="' + (selected ? 'background:rgba(0,122,255,0.08);border-color:var(--blue);' : '') + 'cursor:pointer;">';
+      html += '<div class="quiz-item-text">';
+      html += '<div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:4px;">📁 ' + escapeHtml(g.name) + '</div>';
+      html += '<div style="font-size:12px;color:#86868b;">' + count + ' 道题</div>';
+      html += '</div>';
+      html += '<span class="quiz-item-del" onclick="event.stopPropagation();deleteQuizMeGroup(\'' + g.id + '\')">×</span>';
+      html += '</div>';
+    });
+  }
+
+  // 单题列表（未归入任何分组的题）
+  var groupedIds = {};
+  state.quizMeGroups.forEach(function(g) {
+    (g.questionIds || []).forEach(function(id) { groupedIds[id] = true; });
+  });
+  var ungrouped = state.quizMeQuestions.filter(function(q) { return !groupedIds[q.id]; });
+
+  if (totalSingle === 0 && totalGroups === 0) {
     html += '<div style="text-align:center;color:var(--gray);font-size:13px;padding:40px 20px;">还没有题目，点上方按钮添加吧</div>';
+  } else if (ungrouped.length === 0 && totalGroups > 0) {
+    html += '<div style="text-align:center;color:var(--gray);font-size:13px;padding:20px;">所有题目都已归入分组</div>';
   } else {
-    state.quizMeQuestions.forEach(function(q, i) {
-      var selected = window._quizMeSelected.indexOf(i) > -1;
-      html += '<div class="quiz-item' + (selected ? ' selected' : '') + '" data-quiz-me-idx="' + i + '" style="' + (selected ? 'background:rgba(0,122,255,0.08);border-color:var(--blue);' : '') + '">';
+    ungrouped.forEach(function(q) {
+      var realIdx = state.quizMeQuestions.indexOf(q);
+      var selected = window._quizMeSelectMode && window._quizMeSelected && window._quizMeSelected.indexOf(q.id) > -1;
+      var clickAction = window._quizMeSelectMode
+        ? 'toggleQuizMeQuestionSelect(\'' + q.id + '\')'
+        : '';
+      html += '<div class="quiz-item" onclick="' + clickAction + '" style="' + (selected ? 'background:rgba(0,122,255,0.08);border-color:var(--blue);' : '') + (window._quizMeSelectMode ? 'cursor:pointer;' : '') + '">';
       html += '<div class="quiz-item-text">';
       html += '<div style="font-size:13px;color:var(--gray);margin-bottom:4px;">' + (q.type === 'multi' ? '【多选】' : '【单选】') + '</div>';
       html += escapeHtml(q.question);
       html += '<div style="font-size:12px;color:#86868b;margin-top:6px;">选项：' + q.options.map(function(o){ return escapeHtml(o); }).join(' / ') + '</div>';
       html += '</div>';
-      html += '<span class="quiz-item-del" onclick="event.stopPropagation();deleteQuizMeQuestion(' + i + ')">×</span>';
+      html += '<span class="quiz-item-del" onclick="event.stopPropagation();deleteQuizMeQuestion(' + realIdx + ')">×</span>';
       html += '</div>';
     });
   }
   html += '</div>';
 
-  // 底部操作栏（多选模式）
-  html += '<div id="quizMeBar" class="quiz-bar' + (window._quizMeSelected.length > 0 ? ' show' : '') + '">';
-  html += '<button class="btn-cancel" onclick="exitQuizMeSelect()">取消</button>';
-  html += '<button class="btn-del" onclick="confirmQuizMeSend()" style="background:rgba(0,122,255,0.85);">发送（' + window._quizMeSelected.length + '）</button>';
-  html += '</div>';
-
   content.innerHTML = html;
 
-  // 绑定长按
-  setTimeout(bindQuizMeLongPress, 50);
+  // 底部按钮条
+  var _oldBar = document.getElementById('quizFixedBar');
+  if (_oldBar) _oldBar.remove();
+  var selCount = ((window._quizMeSelected && window._quizMeSelected.length) || 0) + ((window._quizMeSelectedGroups && window._quizMeSelectedGroups.length) || 0);
+  if (window._quizMeSelectMode && selCount > 0) {
+    var _bar = document.createElement('div');
+    _bar.id = 'quizFixedBar';
+    _bar.className = 'quiz-bar show';
+    var _btnGroup = '';
+    if ((window._quizMeSelected && window._quizMeSelected.length) > 0) {
+      _btnGroup = '<button class="btn-all" onclick="promptGroupForSelected()">归入分组</button>';
+    }
+    _bar.innerHTML = '<button class="btn-cancel" onclick="exitQuizMeSelect()">取消</button>' + _btnGroup + '<button class="btn-del" onclick="confirmQuizMeSend()" style="background:rgba(0,122,255,0.85);">发送（' + selCount + '）</button>';
+    var _quizPage = document.getElementById('pageQuiz');
+    if (_quizPage) _quizPage.appendChild(_bar);
+  }
+}
+
+window._quizMeSelectMode = false;
+window._quizMeSelected = [];
+window._quizMeSelectedGroups = [];
+
+function toggleQuizMeSelect() {
+  window._quizMeSelectMode = !window._quizMeSelectMode;
+  if (!window._quizMeSelectMode) {
+    window._quizMeSelected = [];
+    window._quizMeSelectedGroups = [];
+  }
+  renderQuizMeTab();
+}
+
+function toggleQuizMeGroupSelect(gid) {
+  if (!window._quizMeSelectedGroups) window._quizMeSelectedGroups = [];
+  var pos = window._quizMeSelectedGroups.indexOf(gid);
+  if (pos > -1) window._quizMeSelectedGroups.splice(pos, 1);
+  else window._quizMeSelectedGroups.push(gid);
+  renderQuizMeTab();
+}
+
+function toggleQuizMeQuestionSelect(qid) {
+  if (!window._quizMeSelected) window._quizMeSelected = [];
+  var pos = window._quizMeSelected.indexOf(qid);
+  if (pos > -1) window._quizMeSelected.splice(pos, 1);
+  else window._quizMeSelected.push(qid);
+  renderQuizMeTab();
+}
+
+function exitQuizMeSelect() {
+  window._quizMeSelectMode = false;
+  window._quizMeSelected = [];
+  window._quizMeSelectedGroups = [];
+  renderQuizMeTab();
+}
+
+function openQuizMeAddGroupModal() {
+  initQuizMeData();
+  var name = prompt('分组名称：');
+  if (!name || !name.trim()) return;
+  state.quizMeGroups.push({
+    id: 'qmg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    name: name.trim(),
+    questionIds: []
+  });
+  saveState();
+  renderQuizMeTab();
+  showToast('分组已创建');
+}
+
+function openQuizMeAddModalInGroup(gid) {
+  window._quizMeAddTargetGroup = gid;
+  window._quizMeType = 'single';
+  document.getElementById('quizMeQInput').value = '';
+  document.getElementById('quizMeOptionsContainer').innerHTML = '';
+  addQuizMeOption();
+  addQuizMeOption();
+  switchQuizMeType('single');
+  document.getElementById('quizMeAddModal').classList.add('show');
+}
+
+function openQuizMeAddFromBankModal(gid) {
+  initQuizMeData();
+  var g = state.quizMeGroups.find(function(x) { return x.id === gid; });
+  if (!g) return;
+
+  var grouped = {};
+  state.quizMeGroups.forEach(function(gg) {
+    (gg.questionIds || []).forEach(function(id) { grouped[id] = true; });
+  });
+  var available = state.quizMeQuestions.filter(function(q) { return !grouped[q.id]; });
+
+  if (available.length === 0) {
+    showToast('没有可添加的题目，请先去主页添加');
+    return;
+  }
+
+  var lines = available.map(function(q, i) { return (i+1) + '. ' + q.question; });
+  var msg = '输入要加入本组的问题编号（多个用逗号分隔）：\n\n' + lines.join('\n');
+  var choice = prompt(msg);
+  if (!choice) return;
+
+  var nums = choice.split(/[,，\s]+/).map(function(s) { return parseInt(s); }).filter(function(n) { return !isNaN(n) && n >= 1 && n <= available.length; });
+  if (nums.length === 0) { showToast('未选择'); return; }
+
+  if (!g.questionIds) g.questionIds = [];
+  nums.forEach(function(n) {
+    var q = available[n-1];
+    if (q && g.questionIds.indexOf(q.id) === -1) g.questionIds.push(q.id);
+  });
+  saveState();
+  renderQuizMeGroupDetail();
+  showToast('已加入 ' + nums.length + ' 道题');
+}
+
+function promptGroupForSelected() {
+  var selCount = (window._quizMeSelected && window._quizMeSelected.length) || 0;
+  if (selCount === 0) { showToast('请先选择题目'); return; }
+
+  var options = ['【新建分组】'];
+  state.quizMeGroups.forEach(function(g) {
+    options.push('【已有】' + g.name);
+  });
+  var msg = '把选中的 ' + selCount + ' 道题归入哪里？\n\n';
+  options.forEach(function(o, i) { msg += (i+1) + '. ' + o + '\n'; });
+  var choice = prompt(msg, '1');
+  if (!choice) return;
+  var idx = parseInt(choice) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= options.length) { showToast('选择无效'); return; }
+
+  var targetGid;
+  if (idx === 0) {
+    var name = prompt('新分组名称：');
+    if (!name || !name.trim()) return;
+    targetGid = 'qmg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+    state.quizMeGroups.push({ id: targetGid, name: name.trim(), questionIds: [] });
+  } else {
+    targetGid = state.quizMeGroups[idx - 1].id;
+  }
+
+  var g = state.quizMeGroups.find(function(x) { return x.id === targetGid; });
+  if (!g) return;
+  if (!g.questionIds) g.questionIds = [];
+  window._quizMeSelected.forEach(function(qid) {
+    if (g.questionIds.indexOf(qid) === -1) g.questionIds.push(qid);
+  });
+
+  saveState();
+  window._quizMeSelected = [];
+  window._quizMeSelectedGroups = [];
+  window._quizMeSelectMode = false;
+  renderQuizMeTab();
+  showToast('已归入分组');
+}
+
+function deleteQuizMeGroup(gid) {
+  if (!confirm('删除该分组？里面的题目会回到未分组状态。')) return;
+  state.quizMeGroups = state.quizMeGroups.filter(function(g) { return g.id !== gid; });
+  saveState();
+  renderQuizMeTab();
+  showToast('分组已删除');
+}
+
+function openQuizMeGroupDetail(gid) {
+  window._currentQuizMeGroupId = gid;
+  var g = state.quizMeGroups.find(function(x) { return x.id === gid; });
+  if (!g) { showToast('分组不存在'); return; }
+  var titleEl = document.getElementById('quizMeGroupTitle');
+  if (titleEl) titleEl.textContent = g.name;
+  renderQuizMeGroupDetail();
+  navigateTo('pageQuizMeGroup');
+}
+
+function renderQuizMeGroupDetail() {
+  initQuizMeData();
+  var gid = window._currentQuizMeGroupId;
+  var g = state.quizMeGroups.find(function(x) { return x.id === gid; });
+  if (!g) { navigateTo('pageQuiz'); return; }
+
+  var container = document.getElementById('quizMeGroupContent');
+  if (!container) return;
+
+  var html = '';
+  html += '<div style="padding:12px 16px 0;display:flex;gap:8px;">';
+  html += '<button class="quiz-add-btn" onclick="openQuizMeAddModalInGroup(\'' + gid + '\')" style="flex:1;margin:0;">+ 新建题目到本组</button>';
+  html += '<button class="quiz-add-btn" onclick="openQuizMeAddFromBankModal(\'' + gid + '\')" style="flex:1;margin:0;">+ 从题库选择</button>';
+  html += '</div>';
+  html += '<div style="padding:8px 16px 40px;">';
+  html += '<div style="font-size:12px;color:var(--gray);margin-bottom:8px;">本组共 ' + (g.questionIds || []).length + ' 道题</div>';
+
+  var ids = g.questionIds || [];
+  if (ids.length === 0) {
+    html += '<div style="text-align:center;color:var(--gray);font-size:13px;padding:40px 20px;">本组还没有题目，点上方按钮添加吧</div>';
+  } else {
+    ids.forEach(function(qid) {
+      var q = state.quizMeQuestions.find(function(x) { return x.id === qid; });
+      if (!q) return;
+      html += '<div class="quiz-item">';
+      html += '<div class="quiz-item-text">';
+      html += '<div style="font-size:13px;color:var(--gray);margin-bottom:4px;">' + (q.type === 'multi' ? '【多选】' : '【单选】') + '</div>';
+      html += escapeHtml(q.question);
+      html += '<div style="font-size:12px;color:#86868b;margin-top:6px;">选项：' + q.options.map(function(o){ return escapeHtml(o); }).join(' / ') + '</div>';
+      html += '</div>';
+      html += '<span class="quiz-item-del" onclick="removeQuestionFromQuizMeGroup(\'' + gid + '\',\'' + qid + '\')">×</span>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function removeQuestionFromQuizMeGroup(gid, qid) {
+  var g = state.quizMeGroups.find(function(x) { return x.id === gid; });
+  if (!g || !g.questionIds) return;
+  g.questionIds = g.questionIds.filter(function(id) { return id !== qid; });
+  saveState();
+  renderQuizMeGroupDetail();
+  showToast('已移出分组');
+}
+
+function confirmQuizMeSend() {
+  var selCount = ((window._quizMeSelected && window._quizMeSelected.length) || 0) + ((window._quizMeSelectedGroups && window._quizMeSelectedGroups.length) || 0);
+  if (selCount === 0) { showToast('请先选择题库'); return; }
+  openQuizSendModal();
 }
 
 function bindQuizMeLongPress() {
@@ -10136,21 +10658,17 @@ function bindQuizMeLongPress() {
 
 function deleteQuizMeQuestion(idx) {
   if (!state.quizMeQuestions || idx < 0 || idx >= state.quizMeQuestions.length) return;
+  var removed = state.quizMeQuestions[idx];
   state.quizMeQuestions.splice(idx, 1);
+  state.quizMeGroups.forEach(function(g) {
+    if (g.questionIds) {
+      g.questionIds = g.questionIds.filter(function(id) { return id !== removed.id; });
+    }
+  });
   window._quizMeSelected = [];
   saveState();
   renderQuizMeTab();
   showToast('已删除');
-}
-
-function exitQuizMeSelect() {
-  window._quizMeSelected = [];
-  renderQuizMeTab();
-}
-
-function confirmQuizMeSend() {
-  if (window._quizMeSelected.length === 0) { showToast('请先长按选择题库'); return; }
-  openQuizSendModal();
 }
 
 // ===== 添加题目弹窗 =====
@@ -10210,15 +10728,31 @@ function confirmQuizMeAdd() {
   if (options.length < 2) { showToast('至少 2 个选项'); return; }
 
   initQuizMeData();
+  var newId = 'qm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   state.quizMeQuestions.push({
-    id: 'qm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    id: newId,
     question: q,
     type: window._quizMeType,
     options: options
   });
+
+  var targetGid = window._quizMeAddTargetGroup;
+  if (targetGid) {
+    var g = state.quizMeGroups.find(function(x) { return x.id === targetGid; });
+    if (g) {
+      if (!g.questionIds) g.questionIds = [];
+      g.questionIds.push(newId);
+    }
+    window._quizMeAddTargetGroup = null;
+  }
+
   saveState();
   closeQuizMeAddModal();
-  renderQuizMeTab();
+  if (document.getElementById('pageQuizMeGroup').classList.contains('active')) {
+    renderQuizMeGroupDetail();
+  } else {
+    renderQuizMeTab();
+  }
   showToast('已保存');
 }
 
@@ -10246,15 +10780,26 @@ function closeQuizSendModal() {
 }
 
 function sendQuizMeTo(dreamId) {
-  if (window._quizMeSelected.length === 0) { closeQuizSendModal(); return; }
+  var selSingle = window._quizMeSelected || [];
+  var selGroups = window._quizMeSelectedGroups || [];
+  if (selSingle.length === 0 && selGroups.length === 0) { closeQuizSendModal(); return; }
   var dream = state.dreams.find(function(x) { return x.id === dreamId; });
   if (!dream) return;
 
-  // 收集选中的题目
-  var picked = window._quizMeSelected.slice().sort(function(a,b){return a-b;}).map(function(i) {
-    var q = state.quizMeQuestions[i];
-    return { id: q.id, question: q.question, type: q.type, options: q.options.slice() };
+  // 收集题目：单题 + 分组内全部题目，合并去重
+  var qidSet = {};
+  selSingle.forEach(function(qid) { qidSet[qid] = true; });
+  selGroups.forEach(function(gid) {
+    var g = state.quizMeGroups.find(function(x) { return x.id === gid; });
+    if (!g) return;
+    (g.questionIds || []).forEach(function(qid) { qidSet[qid] = true; });
   });
+
+  var picked = Object.keys(qidSet).map(function(qid) {
+    var q = state.quizMeQuestions.find(function(x) { return x.id === qid; });
+    if (!q) return null;
+    return { id: q.id, question: q.question, type: q.type, options: q.options.slice() };
+  }).filter(function(x) { return x; });
 
   // 切换到和这个梦角的聊天
   saveChatMessages();
@@ -12636,7 +13181,9 @@ function awDeleteSelected() {
   window._awSelected = [];
   saveState();
   renderAddedWidgets();
-  try { renderAppIcons(); } catch(e) {}
+  setTimeout(function() {
+    try { renderAppIcons(); } catch(e) {}
+  }, 200);
   showToast('已删除 ' + count + ' 个组件');
 }
 
@@ -12786,9 +13333,11 @@ function calcWidgetDropPos(ghostLeft, ghostTop, w) {
   var padTop = parseFloat(cs.paddingTop) || 24;
   var gapX = parseFloat(cs.columnGap) || 12;
   var gapY = parseFloat(cs.rowGap) || 20;
-  var gridW = window.innerWidth;
-  if (!gridW || gridW < 100) gridW = document.documentElement.clientWidth;
-  if (!gridW || gridW < 100) gridW = 390;
+  var gridW = pageW;
+  if (!gridW || gridW < 100) {
+    var phoneEl2 = document.querySelector('.phone');
+    gridW = phoneEl2 ? phoneEl2.clientWidth : 390;
+  }
   var cellW = (gridW - padLeft * 2 - gapX * 3) / 4;
   var cellH = 82;
 
