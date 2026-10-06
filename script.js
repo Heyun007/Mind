@@ -5637,16 +5637,20 @@ function triggerAiComment(diaryId, replyToAuthorId) {
 
   if (replyToAuthorId) {
     // 回复别人
-    if (replyCount >= 2) return; // 回复上限 2 次
-    if (Math.random() > 0.5) return; // 50% 概率回复
+    if (replyCount >= 5) return;
+    if (Math.random() > 0.8) return; // 80% 概率回复
     isReply = true;
   } else {
     // 主动评论
-    if (activeCount >= 2) return; // 主动上限 2 条
-    if (Math.random() > 0.4) return; // 40% 概率主动评论
+    if (activeCount >= 5) return;
+    if (Math.random() > 0.7) return; // 70% 概率主动评论
   }
 
-  var card = state.cards[Math.floor(Math.random() * state.cards.length)];
+  // 只从"非 base64 图片"的字卡里选（防止评论变成图片）
+  var textCards = state.cards.filter(function(c) {
+    return c && c.text && typeof c.text === 'string' && c.text.length < 200 && c.text.indexOf('data:image') !== 0;
+  });
+  var card = textCards.length > 0 ? textCards[Math.floor(Math.random() * textCards.length)] : null;
   var text = card ? card.text : '……';
 
   var comment = {
@@ -5672,6 +5676,20 @@ function triggerAiComment(diaryId, replyToAuthorId) {
     renderDiaryList();
   }
 }
+
+function checkAutoDiaryComments() {
+  if (!state.diaries || state.diaries.length === 0) return;
+  // 只处理最近 5 篇日记
+  var recent = state.diaries.slice().sort(function(a, b) { return b.time - a.time; }).slice(0, 5);
+  recent.forEach(function(diary) {
+    if (Math.random() < 0.15) {
+      triggerAiComment(diary.id, null);
+    }
+  });
+}
+
+setInterval(checkAutoDiaryComments, 60000);
+
 // ===== 主屏幕背景 =====
 function handleHomeBg(e) {
   var file = e.target.files[0];
