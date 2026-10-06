@@ -2717,96 +2717,182 @@ if (styleEl) {
 function handleImportCards(e) {
   var file = e.target.files[0];
   if (!file) return;
-  
+
   var reader = new FileReader();
   reader.onload = function(ev) {
     try {
-      var importedData = JSON.parse(ev.target.result);
+      var data = JSON.parse(ev.target.result);
+
       var newCards = [];
-      
-      // 1. 如果文件里带了分组信息 (customReplyGroups)，优先按分组导入
-      if (importedData.customReplyGroups && Array.isArray(importedData.customReplyGroups)) {
-        var existingCatNames = state.categories.map(function(c) { return c.name; });
-        
-        importedData.customReplyGroups.forEach(function(group) {
-          var catName = group.name || '未命名分组';
-          var targetCatId = '';
-          
-          // 检查网站里是否已有同名分类
-          var existingCat = state.categories.find(function(c) { return c.name === catName; });
-          if (existingCat) {
-            targetCatId = existingCat.id;
-          } else {
-            // 没有的话，自动建一个！
-            targetCatId = 'cat_imported_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
-            state.categories.push({ id: targetCatId, name: catName, collapsed: false });
+
+      // ===== 工具函数 =====
+
+      // 判断一个字符串是否像"字卡"（不是 key、不是 URL、不是纯符号）
+      function looksLikeCard(s) {
+        if (!s || typeof s !== 'string') return false;
+        s = s.trim();
+        if (s.length === 0 || s.length > 500) return false;
+        // 排除纯符号 / 纯数字 / 纯英文标点
+        if (/^[\s\W\d]+$/.test(s)) return false;
+        // 排除看起来是 URL / 路径 / 时间戳
+        if (/^https?:\/\//i.test(s)) return false;
+        if (/^data:/i.test(s)) return false;
+        if (/^\d{10,}$/.test(s)) return false;
+        return true;
+      }
+
+      // 递归扫描 JSON，提取所有看起来像字卡的字符串
+      var visited = 0;
+      function scan(node, currentGroupName) {
+        if (visited > 20000) return; // 防卡死
+        visited++;
+        if (node == null) return;
+
+        // 情况 1：字符串 → 可能是字卡
+        if (typeof node === 'string') {
+          if (looksLikeCard(node)) {
+            newCards.push({ text: node.trim(), groupName: currentGroupName || '' });
           }
-          
-          // 遍历这个分组里的所有字卡
-          if (group.items && Array.isArray(group.items)) {
-            group.items.forEach(function(text) {
+          return;
+        }
+
+        // 情况 2：数组 → 逐个扫描
+        if (Array.isArray(node)) {
+          node.forEach(function(item) { scan(item, currentGroupName); });
+          return;
+        }
+
+        // 情况 3：对象 → 遍历所有 value
+        if (typeof node === 'object') {
+          // 尝试识别常见的"分组名"字段
+          var possibleGroupName = currentGroupName;
+          var nameKeys = ['name', 'groupName', 'category', 'group', 'title', '分组', '分类'];
+          for (var nk = 0; nk < nameKeys.length; nk++) {
+            var v = node[nameKeys[nk]];
+            if (typeof v === 'string' && v.trim() && v.length < 50) {
+              possibleGroupName = v.trim();
+              break;
+            }
+          }
+
+          Object.keys(node).forEach(function(k) {
+            // 优先跳过一些明显的"元数据" key
+            var skipKeys = ['id', '_id', 'uid', 'uuid', 'version', 'createdAt', 'updatedAt', 'timestamp', 'date', 'time'];
+            if (skipKeys.indexOf(k) > -1) return;
+
+            // 优先扫描 items / cards / list / replies / questions / texts 等字段
+            scan(node[k], possibleGroupName);
+          });
+        }
+      }
+
+      // ===== 先按原有格式试 =====
+
+      // 格式 A：customReplyGroups
+      if (data.customReplyGroups && Array.isArray(data.customReplyGroups)) {
+        data.customReplyGroups.forEach(function(group) {
+          var catName = (group && group.name) ? String(group.name).trim() : '未命名分组';
+          var items = (group && group.items) ? group.items : [];
+          if (Array.isArray(items)) {
+            items.forEach(function(text) {
               if (text && typeof text === 'string' && text.trim() !== '') {
-                newCards.push({ 
-                  text: text.trim(), 
-                  cat: targetCatId 
-                });
+                newCards.push({ text: text.trim(), groupName: catName });
               }
-            });
-          }
-        });
-      } 
-      // 2. 如果没有分组信息，退回原来的全放默认分组逻辑
-      else if (importedData.customReplies && Array.isArray(importedData.customReplies)) {
-        var defaultCatId = state.categories.find(function(c) { return c.id === 'default'; }) ? 'default' : state.categories[0].id;
-        importedData.customReplies.forEach(function(text) {
-          if (text && typeof text === 'string' && text.trim() !== '') {
-            newCards.push({ 
-              text: text.trim(), 
-              cat: defaultCatId 
             });
           }
         });
       }
 
+      // 格式 B：customReplies
+      if (newCards.length === 0 && data.customReplies && Array.isArray(data.customReplies)) {
+        data.customReplies.forEach(function(text) {
+          if (text && typeof text === 'string' && text.trim() !== '') {
+            newCards.push({ text: text.trim(), groupName: '' });
+          }
+        });
+      }
+
+      // 格式 C：万能递归扫描
+      if (newCards.length === 0) {
+        scan(data, '');
+      }
+
+      // ===== 兜底 =====
       if (newCards.length === 0) {
         showToast('没有找到可导入的字卡数据');
         return;
       }
 
-      // 3. 去重合并（防止导入一堆重复的）
-      var existingTexts = new Set(state.cards.map(function(c) { return c.text; }));
-      var addedCount = 0;
-      
-      newCards.forEach(function(card) {
-        if (!existingTexts.has(card.text)) {
-          state.cards.push({
-            id: 'imported_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-            text: card.text,
-            cat: card.cat
-          });
-          existingTexts.add(card.text);
-          addedCount++;
+      // 去重
+      var seen = {};
+      var uniqueCards = [];
+      newCards.forEach(function(c) {
+        var key = c.text;
+        if (!seen[key]) {
+          seen[key] = true;
+          uniqueCards.push(c);
         }
       });
 
-      // 4. 保存并刷新界面
+      // 处理分组：给每个 groupName 分配或创建分类
+      var groupNameToId = {};
+
+      // 先读取已有分类（名称→id）
+      state.categories.forEach(function(cat) {
+        groupNameToId[cat.name] = cat.id;
+      });
+
+      // 默认分类
+      var defaultCatId = state.categories.find(function(c) { return c.id === 'default'; })
+        ? 'default'
+        : (state.categories[0] ? state.categories[0].id : 'default');
+
+      // 递归遇到的 groupName 需要创建分类
+      uniqueCards.forEach(function(c) {
+        if (!c.groupName) {
+          c._catId = defaultCatId;
+          return;
+        }
+        if (!groupNameToId[c.groupName]) {
+          var newCatId = 'cat_imported_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+          state.categories.push({ id: newCatId, name: c.groupName, collapsed: false });
+          groupNameToId[c.groupName] = newCatId;
+        }
+        c._catId = groupNameToId[c.groupName];
+      });
+
+      // 合并进 state.cards（按 text 去重）
+      var existingTexts = new Set(state.cards.map(function(c) { return c.text; }));
+      var addedCount = 0;
+
+      uniqueCards.forEach(function(c) {
+        if (existingTexts.has(c.text)) return;
+        state.cards.push({
+          id: 'imported_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+          text: c.text,
+          cat: c._catId
+        });
+        existingTexts.add(c.text);
+        addedCount++;
+      });
+
+      // 保存并刷新
       if (addedCount > 0) {
         saveState();
         renderWordCards();
-        showToast('成功按分组导入 ' + addedCount + ' 张字卡！');
+        showToast('成功导入 ' + addedCount + ' 张字卡');
       } else {
-        showToast('所有字卡都已经存在了，无需重复导入');
+        showToast('所有字卡都已存在，无需重复导入');
       }
-      
+
     } catch (err) {
       showToast('文件解析失败，请确认是有效的 JSON 格式');
       console.error(err);
     }
   };
   reader.readAsText(file);
-  e.target.value = ''; // 清空选择框，方便下次再选
+  e.target.value = '';
 }
-
 
 // ===== 3. 处理图标上传并自动裁剪成 1:1 =====
 function handleIconUpload(event, key) {
