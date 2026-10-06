@@ -407,6 +407,7 @@ async function init() {
   applyBeautySettings();
   initSpeedSettings();
   checkAutoDiary();
+    setInterval(checkAutoCommentOnDiary, 10 * 60 * 1000);
   applyHomeBg();
     checkMailDelivery();
   setInterval(checkMailDelivery, 30000);
@@ -5413,6 +5414,63 @@ function checkAutoDiary() {
     });
     saveState();
   });
+}
+
+// ===== 梦角主动评论你的日记（定时扫描） =====
+function checkAutoCommentOnDiary() {
+  if (!state.diaries || state.diaries.length === 0) return;
+  if (!state.dreams || state.dreams.length === 0) return;
+  if (!state.cards || state.cards.length === 0) return;
+
+  // 30% 概率本次扫描触发一次
+  if (Math.random() > 0.30) return;
+
+  // 找最近 3 天内的日记
+  var now = Date.now();
+  var THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
+  var recent = state.diaries.filter(function(d) {
+    return (now - d.time) < THREE_DAYS;
+  });
+  if (recent.length === 0) return;
+
+  // 随机挑一篇
+  var diary = recent[Math.floor(Math.random() * recent.length)];
+
+  // 随机挑一个梦角（不能是日记作者）
+  var candidates = state.dreams.filter(function(d) { return d.id !== diary.authorId; });
+  if (candidates.length === 0) return;
+  var dream = candidates[Math.floor(Math.random() * candidates.length)];
+
+  if (!diary.comments) diary.comments = [];
+
+  // 该梦角在这篇日记下主动评论数已达 2 条 → 跳过
+  var activeCount = diary.comments.filter(function(c) {
+    return c.authorId === dream.id && !c.replyTo;
+  }).length;
+  if (activeCount >= 2) return;
+
+  // 50% 概率真的发（避免过密）
+  if (Math.random() > 0.50) return;
+
+  // 从字卡里随机挑一句
+  var card = state.cards[Math.floor(Math.random() * state.cards.length)];
+  var text = card ? card.text : '……';
+
+  diary.comments.push({
+    id: 'cmt_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    authorId: dream.id,
+    authorName: dream.name,
+    authorAvatar: dream.avatar || '',
+    text: text,
+    time: Date.now()
+  });
+  saveState();
+
+  // 如果你正在日记页面，实时刷新
+  var pageDiary = document.getElementById('pageDiary');
+  if (pageDiary && pageDiary.classList.contains('active')) {
+    renderDiaryList();
+  }
 }
 
 // ===== 日记评论 =====
