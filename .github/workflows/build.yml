@@ -23,37 +23,99 @@ jobs:
           mkdir -p app/src/main/res/mipmap-xxxhdpi
 
           cat > app/src/main/java/com/heyun007/mind/MainActivity.java << 'EOF'
-          package com.heyun007.mind;
+                    package com.heyun007.mind;
 
           import android.app.Activity;
           import android.content.Intent;
           import android.net.Uri;
           import android.os.Build;
           import android.os.Bundle;
+          import android.util.Base64;
+          import android.webkit.JavascriptInterface;
           import android.webkit.PermissionRequest;
+          import android.webkit.RenderProcessGoneDetail;
           import android.webkit.ValueCallback;
           import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
+
+          import java.io.OutputStream;
+          import java.util.ArrayList;
+          import java.util.List;
 
           public class MainActivity extends Activity {
               private WebView webView;
               private ValueCallback<Uri[]> filePathCallback;
               private static final int FILE_CHOOSER_CODE = 1001;
+              private static final int SAVE_FILE_CODE = 1002;
+
+              private String pendingSaveContent = null;
+              private String pendingSaveFileName = null;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
+                  setupWebView();
+
+                  if (Build.VERSION.SDK_INT >= 33) {
+                      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2001);
+                  }
+              }
+
+              private void setupWebView() {
                   webView = new WebView(this);
                   setContentView(webView);
-                  webView.getSettings().setJavaScriptEnabled(true);
-                  webView.getSettings().setDomStorageEnabled(true);
-                  webView.getSettings().setDatabaseEnabled(true);
-                  webView.getSettings().setAllowFileAccess(true);
-                  webView.getSettings().setAllowContentAccess(true);
-                  webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
 
-                  webView.setWebViewClient(new WebViewClient());
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setDatabaseEnabled(true);
+                  settings.setAllowFileAccess(true);
+                  settings.setAllowContentAccess(true);
+                  settings.setMediaPlaybackRequiresUserGesture(false);
+                  settings.setJavaScriptCanOpenWindowsAutomatically(true);
+
+                  webView.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                          try {
+                              if (view != null && view.getParent() != null) {
+                                  ((android.view.ViewGroup) view.getParent()).removeView(view);
+                              }
+                              if (view != null) view.destroy();
+                          } catch (Exception ignored) {}
+                          setupWebView();
+                          return true;
+                      }
+                  });
+
+                  webView.addJavascriptInterface(new Object() {
+                      @JavascriptInterface
+                      public void saveFile(String fileName, String base64Content) {
+                          pendingSaveFileName = fileName;
+                          pendingSaveContent = base64Content;
+                          runOnUiThread(new Runnable() {
+                              @Override
+                              public void run() {
+                                  try {
+                                      Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                                      intent.addCategory(Intent.CATEGORY_OPENABLE);
+                                      intent.setType("application/json");
+                                      intent.putExtra(Intent.EXTRA_TITLE, pendingSaveFileName);
+                                      startActivityForResult(intent, SAVE_FILE_CODE);
+                                  } catch (Exception e) {
+                                      showJsToast("保存失败：" + e.getMessage());
+                                  }
+                              }
+                          });
+                      }
+
+                      @JavascriptInterface
+                      public boolean isAndroidApp() {
+                          return true;
+                      }
+                  }, "AndroidBridge");
 
                   webView.setWebChromeClient(new WebChromeClient() {
                       @Override
@@ -61,7 +123,6 @@ jobs:
                           if (filePathCallback != null) filePathCallback.onReceiveValue(null);
                           filePathCallback = cb;
 
-                          // 【核心修复】：用 ACTION_GET_CONTENT + OPEN_DOCUMENT，兼容 vivo
                           Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                           intent.addCategory(Intent.CATEGORY_OPENABLE);
                           intent.setType("*/*");
@@ -70,7 +131,6 @@ jobs:
                           try {
                               startActivityForResult(Intent.createChooser(intent, "选择文件"), FILE_CHOOSER_CODE);
                           } catch (Exception e) {
-                              // 兜底：试 OPEN_DOCUMENT
                               try {
                                   Intent i2 = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                                   i2.addCategory(Intent.CATEGORY_OPENABLE);
@@ -89,17 +149,43 @@ jobs:
                           runOnUiThread(new Runnable() {
                               @Override
                               public void run() {
-                                  request.grant(request.getResources());
+                                  try {
+                                      String[] resources = request.getResources();
+                                      List<String> allowed = new ArrayList<>();
+                                      for (String r : resources) {
+                                          if (PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID.equals(r)) {
+                                              allowed.add(r);
+                                          }
+                                      }
+                                      if (allowed.isEmpty()) {
+                                          request.deny();
+                                      } else {
+                                          request.grant(allowed.toArray(new String[0]));
+                                      }
+                                  } catch (Exception e) {
+                                      try { request.deny(); } catch (Exception ignored) {}
+                                  }
                               }
                           });
                       }
                   });
 
                   webView.loadUrl("https://heyun007.github.io/Mind/");
+              }
 
-                  if (Build.VERSION.SDK_INT >= 33) {
-                      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2001);
-                  }
+              private void showJsToast(final String msg) {
+                  runOnUiThread(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              String escaped = msg.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ");
+                              webView.evaluateJavascript(
+                                  "try{ if(typeof showToast==='function') showToast('" + escaped + "'); }catch(e){}",
+                                  null
+                              );
+                          } catch (Exception ignored) {}
+                      }
+                  });
               }
 
               @Override
@@ -120,6 +206,23 @@ jobs:
                       }
                       filePathCallback.onReceiveValue(results);
                       filePathCallback = null;
+                  } else if (requestCode == SAVE_FILE_CODE) {
+                      if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null && pendingSaveContent != null) {
+                          try {
+                              Uri uri = data.getData();
+                              OutputStream os = getContentResolver().openOutputStream(uri);
+                              byte[] bytes = Base64.decode(pendingSaveContent, Base64.DEFAULT);
+                              os.write(bytes);
+                              os.close();
+                              showJsToast("备份保存成功！");
+                          } catch (Exception e) {
+                              showJsToast("保存失败：" + e.getMessage());
+                          }
+                      } else {
+                          showJsToast("已取消保存");
+                      }
+                      pendingSaveContent = null;
+                      pendingSaveFileName = null;
                   } else {
                       super.onActivityResult(requestCode, resultCode, data);
                   }
@@ -127,7 +230,7 @@ jobs:
 
               @Override
               public void onBackPressed() {
-                  if (webView.canGoBack()) webView.goBack();
+                  if (webView != null && webView.canGoBack()) webView.goBack();
                   else super.onBackPressed();
               }
           }
