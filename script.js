@@ -1233,7 +1233,6 @@ function backupData() {
   var data = {
     state: state,
     chatMessages: chatMessages,
-    // 补充：表情包、私聊背景、陪伴设置、聊天设置
     stickers: JSON.parse(localStorage.getItem('dreamStickers') || '[]'),
     stickerGroups: stickerGroups,
     dreamChatBg: localStorage.getItem('dreamChatBg') || null,
@@ -1245,13 +1244,30 @@ function backupData() {
     comp_avatar: localStorage.getItem('comp_avatar') || null,
     version: 2
   };
-  var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  var jsonStr = JSON.stringify(data, null, 2);
+  var fileName = 'Mind_备份_' + new Date().toISOString().slice(0, 10) + '.json';
+
+  // ★ 优先走 Android 原生保存（解决 APK 备份无效）
+  if (window.AndroidBridge && typeof window.AndroidBridge.saveFile === 'function') {
+    try {
+      var base64 = btoa(unescape(encodeURIComponent(jsonStr)));
+      window.AndroidBridge.saveFile(fileName, base64);
+      return;
+    } catch (e) {
+      console.error('原生保存失败，回退到网页方案：', e);
+    }
+  }
+
+  // 网页版 fallback
+  var blob = new Blob([jsonStr], { type: 'application/json' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'Mind_备份_' + new Date().toISOString().slice(0,10) + '.json';
+  a.download = fileName;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
-  showToast('数据已备份（含表情/背景/陪伴）');
+  document.body.removeChild(a);
+  setTimeout(function() { URL.revokeObjectURL(a.href); }, 1500);
+  showToast('数据已备份');
 }
 
 function restoreData(e) {
